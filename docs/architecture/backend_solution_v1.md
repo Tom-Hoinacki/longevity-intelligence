@@ -1,0 +1,16 @@
+# .NET Backend Solution v1
+
+The solution uses direct project references while the backend is one deployable system:
+
+`Longevity.Api` → `Longevity.Application` → `Longevity.Domain`
+`Longevity.Api` → `Longevity.Infrastructure` → `Longevity.Application` and `Longevity.Domain`
+
+- **Domain** holds workflow vocabulary and invariants only.
+- **Application** owns provider-independent use-case contracts.
+- **Infrastructure** is the future home for Postgres, model-provider, telemetry, and scientific-source adapters.
+- **Api** composes the host, health endpoints, logging, configuration, and orchestrator shell.
+- **UnitTests** covers Domain and Application without live integrations.
+
+Direct references keep contracts simple and changes visible while these projects evolve together. An adapter becomes a separate class-library project when it needs independent lifecycle, optional deployment, distinct ownership, or isolation from other infrastructure concerns. A private NuGet package is justified only after a stable, versioned contract is consumed by more than one independently released solution; it is not useful merely to separate folders.
+
+Deferred deliberately: database access, Supabase integration, source intake, source normalization implementation, model-provider adapters, authentication, approval endpoints, publication logic, telemetry exporters, queues, and OpenAPI tooling. The orchestrator is disabled by default; enabling it without a real `IWorkflowRunProcessor` fails clearly rather than pretending workflow processing exists.
