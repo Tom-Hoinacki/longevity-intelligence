@@ -1,0 +1,7 @@
+# Local Supabase CLI configuration.
+# This file contains no cloud credentials or project secrets.
+project_id = "longevity-intelligence"
+
+[db.seed]
+enabled = true
+sql_paths = ["./seed/*.sql"]

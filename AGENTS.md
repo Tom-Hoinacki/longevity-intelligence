@@ -22,3 +22,12 @@ Workflow:
 
 Core Data Model:
 Asset → Claim → Source → Evidence
+
+Cloud development rules:
+- Migration files are the schema source of truth.
+- Do not edit schema directly in the dashboard unless the change is also captured in a migration.
+- Always run a dry run before deployment and require human approval before cloud changes.
+- Never select or connect to a production project automatically.
+- Never use `supabase db reset --linked`.
+- Never expose or store secrets in the repository.
+- Never store personal health data in the public educational schema.

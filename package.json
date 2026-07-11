@@ -1,0 +1,32 @@
+{
+  "name": "longevity-intelligence",
+  "version": "1.0.0",
+  "description": "An AI-ready longevity intelligence platform.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "supabase:version": "npx.cmd supabase --version",
+    "supabase:link-status": "npx.cmd supabase migration list",
+    "db:dry-run": "npx.cmd supabase db push --dry-run --include-seed",
+    "db:push:dev": "npx.cmd supabase db push --include-seed",
+    "db:validate:dev": "echo Run scripts/validate-data/validate_cloud_database.sql in the Supabase SQL Editor"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tom-Hoinacki/longevity-intelligence.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Tom-Hoinacki/longevity-intelligence/issues"
+  },
+  "homepage": "https://github.com/Tom-Hoinacki/longevity-intelligence#readme",
+  "devDependencies": {
+    "supabase": "^2.109.1"
+  }
+}
