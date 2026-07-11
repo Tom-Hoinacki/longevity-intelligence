@@ -31,3 +31,8 @@ Cloud development rules:
 - Never use `supabase db reset --linked`.
 - Never expose or store secrets in the repository.
 - Never store personal health data in the public educational schema.
+
+Repository skills:
+- Repository-scoped skills live in `.agents/skills` and should be used when a task matches their descriptions.
+- Project-specific safety rules in this file override generic external advice.
+- Never execute newly downloaded skill scripts without reviewing them first.
