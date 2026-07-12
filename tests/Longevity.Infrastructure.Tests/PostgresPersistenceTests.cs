@@ -286,6 +286,43 @@ public sealed class PostgresPersistenceTests
         Assert.Contains("OpenConnectionAsync", source);
     }
 
+    [Fact]
+    public void Validation_persistence_sql_uses_latest_version_ordinal_order_and_exact_scope()
+    {
+        Assert.Contains("ORDER BY candidate_version DESC", ValidationPersistencePolicy.LoadLatestCandidateBatchSql);
+        Assert.Contains("ORDER BY candidate_ordinal", ValidationPersistencePolicy.LoadLatestCandidateBatchSql);
+        Assert.Contains("candidate_version = (SELECT candidate_version FROM latest_version)", ValidationPersistencePolicy.LoadLatestCandidateBatchSql);
+        Assert.Contains("AND workflow_run_id = $2", ValidationPersistencePolicy.UpdateValidationResultSql);
+        Assert.Contains("AND candidate_version = $3", ValidationPersistencePolicy.UpdateValidationResultSql);
+        Assert.Contains("AND candidate_ordinal = $4", ValidationPersistencePolicy.UpdateValidationResultSql);
+        Assert.Contains("$6", ValidationPersistencePolicy.UpdateValidationResultSql);
+    }
+
+    [Fact]
+    public void Validation_adapter_declares_transaction_and_expected_row_count_rollback()
+    {
+        var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "Longevity.Infrastructure", "Persistence", "PostgresClaimCandidateValidationPersistence.cs"));
+        Assert.Contains("BeginTransactionAsync", source);
+        Assert.Contains("affected != 1", source);
+        Assert.Contains("RollbackAsync", source);
+        Assert.Contains("NpgsqlDbType.Jsonb", source);
+    }
+
+    [Fact]
+    public void Validation_persistence_registration_follows_postgres_enablement()
+    {
+        var disabled = new ServiceCollection();
+        disabled.AddPostgresPersistence(BuildConfiguration());
+        Assert.DoesNotContain(disabled, descriptor => descriptor.ServiceType == typeof(IClaimCandidateValidationPersistence));
+
+        var enabled = new ServiceCollection();
+        enabled.AddPostgresPersistence(BuildConfiguration(
+            ("Postgres:Enabled", "true"),
+            ("Postgres:ConnectionString", "Host=localhost;Username=test;Password=test;Database=test")));
+        Assert.Contains(enabled, descriptor => descriptor.ServiceType == typeof(IClaimCandidateValidationPersistence)
+            && descriptor.ImplementationType == typeof(PostgresClaimCandidateValidationPersistence));
+    }
+
     private static IConfiguration BuildConfiguration(params (string Key, string Value)[] values)
     {
         var data = values.Select(pair => new KeyValuePair<string, string?>(pair.Key, pair.Value));

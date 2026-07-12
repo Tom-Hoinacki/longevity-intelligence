@@ -42,6 +42,7 @@ public static class PostgresServiceCollectionExtensions
             });
             services.AddSingleton<IWorkflowRunRepository, PostgresWorkflowRunRepository>();
             services.AddSingleton<IClaimExtractionPersistence, PostgresClaimExtractionPersistence>();
+            services.AddSingleton<IClaimCandidateValidationPersistence, PostgresClaimCandidateValidationPersistence>();
         }
 
         return services;
