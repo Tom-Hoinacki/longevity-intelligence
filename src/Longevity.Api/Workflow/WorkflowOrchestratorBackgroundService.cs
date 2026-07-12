@@ -35,7 +35,7 @@ public sealed class WorkflowOrchestratorBackgroundService(
             {
                 try
                 {
-                    await processor.ProcessNextAsync(stoppingToken);
+                    _ = await processor.ProcessNextAsync(stoppingToken);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {

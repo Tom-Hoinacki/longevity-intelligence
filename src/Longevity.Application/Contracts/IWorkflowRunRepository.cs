@@ -2,7 +2,7 @@ using Longevity.Domain.Workflow;
 
 namespace Longevity.Application.Contracts;
 
-public sealed record ClaimedWorkflowRun(WorkflowRunId WorkflowRunId, WorkflowState State);
+public sealed record ClaimedWorkflowRun(WorkflowRunId WorkflowRunId, WorkflowState State, int Version);
 
 public enum WorkflowRunCompletionStatus
 {

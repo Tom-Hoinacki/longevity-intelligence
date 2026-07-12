@@ -19,7 +19,8 @@ public sealed class PostgresWorkflowRunRepository(NpgsqlDataSource dataSource) :
 
         return new ClaimedWorkflowRun(
             new WorkflowRunId(reader.GetGuid(0)),
-            WorkflowState.FromDatabaseValue(reader.GetString(1)));
+            WorkflowState.FromDatabaseValue(reader.GetString(1)),
+            reader.GetInt32(2));
     }
 
     public async Task<WorkflowRunCompletionResult> CompleteClaimedPhaseAsync(

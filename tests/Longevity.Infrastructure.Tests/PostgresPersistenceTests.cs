@@ -38,7 +38,7 @@ public sealed class PostgresPersistenceTests
         Assert.Contains("FOR UPDATE SKIP LOCKED", WorkflowRunClaimPolicy.ClaimNextRunnableSql);
         Assert.Contains("ORDER BY available_at, created_at, id", WorkflowRunClaimPolicy.ClaimNextRunnableSql);
         Assert.Contains("version = run.version + 1", WorkflowRunClaimPolicy.ClaimNextRunnableSql);
-        Assert.Contains("RETURNING run.id, run.state", WorkflowRunClaimPolicy.ClaimNextRunnableSql);
+        Assert.Contains("RETURNING run.id, run.state, run.version", WorkflowRunClaimPolicy.ClaimNextRunnableSql);
     }
 
     [Fact]

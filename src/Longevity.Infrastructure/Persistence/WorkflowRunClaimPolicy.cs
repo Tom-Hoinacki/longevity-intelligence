@@ -34,7 +34,7 @@ public static class WorkflowRunClaimPolicy
             version = run.version + 1
         FROM next_run
         WHERE run.id = next_run.id
-        RETURNING run.id, run.state;
+        RETURNING run.id, run.state, run.version;
         """;
 
     public static IReadOnlyDictionary<string, string> CompletionTransitions { get; } =
