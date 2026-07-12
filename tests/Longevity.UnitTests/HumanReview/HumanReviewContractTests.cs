@@ -123,6 +123,7 @@ public sealed class PendingHumanReviewBatchTests
     [Fact] public void Null_candidate_entries_are_rejected() { var run = Run(); Assert.Throws<ArgumentException>(() => Batch(run, [null!])); }
     [Fact] public void Mixed_workflow_identities_are_rejected() { var run = Run(); Assert.Throws<ArgumentException>(() => Batch(run, [Candidate(run, 1), Candidate(Run(), 2)])); }
     [Fact] public void Mixed_candidate_versions_are_rejected() { var run = Run(); Assert.Throws<ArgumentException>(() => Batch(run, [Candidate(run, 1), Candidate(run, 2, version: 2)])); }
+    [Fact] public void Mixed_source_identities_are_rejected() { var run = Run(); var second = new PendingHumanReviewCandidate(new(Guid.NewGuid()), run, new(Guid.NewGuid()), 1, 2, "claim", "{}", new(true, "{}")); Assert.Throws<ArgumentException>(() => Batch(run, [Candidate(run, 1), second])); }
     [Fact] public void Duplicate_candidate_identities_are_rejected() { var run = Run(); var id = new ClaimCandidateId(Guid.NewGuid()); Assert.Throws<ArgumentException>(() => Batch(run, [Candidate(run, 1, id), Candidate(run, 2, id)])); }
     [Fact] public void Duplicate_ordinals_are_rejected() { var run = Run(); Assert.Throws<ArgumentException>(() => Batch(run, [Candidate(run, 1), Candidate(run, 1)])); }
     [Fact] public void Noncontiguous_ordinals_are_rejected() { var run = Run(); Assert.Throws<ArgumentException>(() => Batch(run, [Candidate(run, 1), Candidate(run, 3)])); }
@@ -137,6 +138,6 @@ public sealed class PendingHumanReviewBatchTests
 
     private static WorkflowRunId Run() => new(Guid.NewGuid());
     private static PendingHumanReviewCandidate Candidate(WorkflowRunId run, int ordinal, ClaimCandidateId? id = null, int version = 1) =>
-        new(id ?? new(Guid.NewGuid()), run, new(Guid.NewGuid()), version, ordinal, "claim", "{}", new(true, "{}"));
+        new(id ?? new(Guid.NewGuid()), run, new(run.Value), version, ordinal, "claim", "{}", new(true, "{}"));
     private static PendingHumanReviewBatch Batch(WorkflowRunId run, IReadOnlyList<PendingHumanReviewCandidate> candidates, int version = 4, WorkflowState? state = null) => new(run, version, state ?? WorkflowState.AwaitingHumanApproval, candidates);
 }

@@ -220,6 +220,80 @@ validation_checks as (
     union all
 
     select
+        'human_review_decision_columns',
+        count(*) = 4
+        and bool_and(
+            case column_name
+                when 'decision_identity' then data_type = 'text' and is_nullable = 'NO'
+                when 'expected_workflow_version' then data_type = 'integer' and is_nullable = 'YES'
+                when 'target_state' then data_type = 'text' and is_nullable = 'YES'
+                when 'reviewer_note' then data_type = 'text' and is_nullable = 'YES'
+                else false
+            end
+        ),
+        string_agg(column_name || ':' || data_type || ':nullable=' || is_nullable, ', ' order by column_name)
+    from information_schema.columns
+    where table_schema = 'workflow'
+      and table_name = 'approvals'
+      and column_name in ('decision_identity', 'expected_workflow_version', 'target_state', 'reviewer_note')
+
+    union all
+
+    select
+        'human_review_decision_constraints',
+        exists (
+            select 1 from workflow_constraint_defs
+            where conname = 'workflow_approvals_decision_identity_check'
+              and definition like '%decision_identity%'
+              and definition like '%btrim%'
+        )
+        and exists (
+            select 1 from workflow_constraint_defs
+            where conname = 'workflow_approvals_review_transition_check'
+              and definition like '%expected_workflow_version%'
+              and definition like '%target_state%'
+              and definition like '%approved%'
+              and definition like '%rejected%'
+        )
+        and exists (
+            select 1 from workflow_constraint_defs
+            where conname = 'workflow_approvals_rejection_reason_check'
+              and definition like '%rationale%'
+              and definition like '%rejected%'
+        )
+        and exists (
+            select 1 from workflow_constraint_defs
+            where conname = 'workflow_approvals_reviewer_note_check'
+              and definition like '%reviewer_note%'
+        ),
+        'identity, transition, rejection reason, and reviewer note checks'
+
+    union all
+
+    select
+        'human_review_decision_idempotency_index',
+        exists (
+            select 1
+            from pg_index index_definition
+            where index_definition.indexrelid = to_regclass('workflow.workflow_approvals_decision_candidate_key')
+              and index_definition.indisunique
+              and pg_get_indexdef(index_definition.indexrelid) like '%(decision_identity, candidate_id)%'
+        ),
+        coalesce(pg_get_indexdef(to_regclass('workflow.workflow_approvals_decision_candidate_key')), 'missing')
+
+    union all
+
+    select
+        'human_review_columns_remain_append_only',
+        not coalesce(has_column_privilege('service_role', to_regclass('workflow.approvals'), 'decision_identity', 'UPDATE'), false)
+        and not coalesce(has_column_privilege('service_role', to_regclass('workflow.approvals'), 'expected_workflow_version', 'UPDATE'), false)
+        and not coalesce(has_column_privilege('service_role', to_regclass('workflow.approvals'), 'target_state', 'UPDATE'), false)
+        and not coalesce(has_column_privilege('service_role', to_regclass('workflow.approvals'), 'reviewer_note', 'UPDATE'), false),
+        'service_role has no update privilege on human-review audit columns'
+
+    union all
+
+    select
         'safe_default_table_acl_and_identifiable_owner',
         exists (
             select 1 from pg_default_acl d

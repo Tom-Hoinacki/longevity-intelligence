@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using Npgsql;
 using Longevity.Api.DependencyInjection;
 using Longevity.Application.Orchestration;
+using Longevity.Application.HumanReview;
 
 namespace Longevity.Infrastructure.Tests;
 
@@ -323,6 +324,77 @@ public sealed class PostgresPersistenceTests
             ("Postgres:ConnectionString", "Host=localhost;Username=test;Password=test;Database=test")));
         Assert.Contains(enabled, descriptor => descriptor.ServiceType == typeof(IClaimCandidateValidationPersistence)
             && descriptor.ImplementationType == typeof(PostgresClaimCandidateValidationPersistence));
+    }
+
+    [Fact]
+    public void Human_review_persistence_registration_follows_postgres_enablement()
+    {
+        var disabled = new ServiceCollection();
+        disabled.AddPostgresPersistence(BuildConfiguration());
+        Assert.DoesNotContain(disabled, descriptor => descriptor.ServiceType == typeof(IHumanReviewPersistence));
+
+        var enabled = new ServiceCollection();
+        enabled.AddPostgresPersistence(BuildConfiguration(
+            ("Postgres:Enabled", "true"),
+            ("Postgres:ConnectionString", "Host=localhost;Username=test;Password=test;Database=test")));
+        Assert.Contains(enabled, descriptor => descriptor.ServiceType == typeof(IHumanReviewPersistence)
+            && descriptor.ImplementationType == typeof(PostgresHumanReviewPersistence));
+    }
+
+    [Fact]
+    public void Human_review_load_sql_selects_only_latest_version_without_hiding_invalid_rows()
+    {
+        Assert.Contains("state = 'awaiting_human_approval'", HumanReviewPersistencePolicy.LoadPendingSql);
+        Assert.Contains("max(candidate_version)", HumanReviewPersistencePolicy.LoadPendingSql);
+        Assert.Contains("candidate.candidate_version = latest.candidate_version", HumanReviewPersistencePolicy.LoadPendingSql);
+        Assert.Contains("ORDER BY candidate.candidate_ordinal", HumanReviewPersistencePolicy.LoadPendingSql);
+        Assert.Contains("deterministic_validation_status", HumanReviewPersistencePolicy.LoadPendingSql);
+        Assert.DoesNotContain("deterministic_validation_status = 'passed'", HumanReviewPersistencePolicy.LoadPendingSql);
+        Assert.Contains("LEFT JOIN workflow.claim_candidates", HumanReviewPersistencePolicy.LoadPendingSql);
+        Assert.Contains("SELECT EXISTS", HumanReviewPersistencePolicy.WorkflowRunExistsSql);
+        Assert.Contains("WHERE id = $1", HumanReviewPersistencePolicy.WorkflowRunExistsSql);
+    }
+
+    [Fact]
+    public void Human_review_decision_sql_is_parameterized_locked_and_optimistically_versioned()
+    {
+        Assert.Contains("pg_advisory_xact_lock", HumanReviewPersistencePolicy.LockDecisionIdentitySql);
+        Assert.Contains("hashtextextended($1, 0)", HumanReviewPersistencePolicy.LockDecisionIdentitySql);
+        Assert.Contains("FOR UPDATE", HumanReviewPersistencePolicy.LockWorkflowRunSql);
+        Assert.Contains("FOR SHARE", HumanReviewPersistencePolicy.LoadEligibleCandidateBatchSql);
+        Assert.Contains("ORDER BY candidate.candidate_ordinal", HumanReviewPersistencePolicy.LoadEligibleCandidateBatchSql);
+        Assert.Contains("VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)", HumanReviewPersistencePolicy.InsertApprovalSql);
+        Assert.Contains("state = 'awaiting_human_approval'", HumanReviewPersistencePolicy.TransitionWorkflowRunSql);
+        Assert.Contains("version = $2", HumanReviewPersistencePolicy.TransitionWorkflowRunSql);
+        Assert.Contains("version = version + 1", HumanReviewPersistencePolicy.TransitionWorkflowRunSql);
+        Assert.Contains("completed_at = CASE WHEN $4 = 'rejected'", HumanReviewPersistencePolicy.TransitionWorkflowRunSql);
+    }
+
+    [Fact]
+    public void Human_review_adapter_uses_one_transaction_and_rolls_back_every_failure_path()
+    {
+        var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "Longevity.Infrastructure", "Persistence", "PostgresHumanReviewPersistence.cs"));
+        Assert.Contains("BeginTransactionAsync", source);
+        Assert.Contains("CommitAsync", source);
+        Assert.Contains("RollbackSafelyAsync", source);
+        Assert.Contains("CancellationToken.None", source);
+        Assert.Contains("HumanReviewConflictException", source);
+        Assert.Contains("HumanReviewPersistenceException", source);
+        Assert.DoesNotContain("ConnectionString", source);
+    }
+
+    [Fact]
+    public void Human_review_migration_preserves_append_only_rows_and_adds_idempotency_contract()
+    {
+        var migration = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "supabase", "migrations", "20260712200000_human_review_decision_idempotency.sql"));
+        Assert.Contains("decision_identity", migration);
+        Assert.Contains("expected_workflow_version", migration);
+        Assert.Contains("unique (decision_identity, candidate_id)", migration);
+        Assert.Contains("workflow_approvals_rejection_reason_check", migration);
+        Assert.Contains("revoke update", migration);
+        Assert.DoesNotContain("disable row level security", migration, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("grant update", migration, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("drop table", migration, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
