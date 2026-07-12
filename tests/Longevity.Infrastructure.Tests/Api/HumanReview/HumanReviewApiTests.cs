@@ -271,6 +271,22 @@ public sealed class HumanReviewApiTests
         Assert.Contains("/internal/human-review/{workflowRunId}/decisions", enabledRoutes);
     }
 
+    [Fact]
+    public void Host_composition_preserves_diagnostics_and_orchestrator_registrations()
+    {
+        var program = File.ReadAllText(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..",
+            "src", "Longevity.Api", "Program.cs"));
+
+        Assert.Contains("AddWorkflowOrchestrator", program);
+        Assert.Contains("AddHostedService<WorkflowOrchestratorBackgroundService>", program);
+        Assert.Contains("AddLongevityDiagnostics", program);
+        Assert.Contains("MapLongevityDiagnostics", program);
+        Assert.Contains("AddHumanReviewApi", program);
+        Assert.Contains("MapHumanReviewApi", program);
+    }
+
     private static async Task<IReadOnlyList<string>> RoutesAsync(IConfiguration configuration)
     {
         var builder = WebApplication.CreateBuilder();
