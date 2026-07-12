@@ -16,6 +16,9 @@ public sealed record ClaimCandidateForValidation
     {
         if (candidateVersion < 1) throw new ArgumentOutOfRangeException(nameof(candidateVersion));
         if (candidateOrdinal < 1) throw new ArgumentOutOfRangeException(nameof(candidateOrdinal));
+        if (candidateId.Value == Guid.Empty) throw new ArgumentException("Candidate identity must be non-empty.", nameof(candidateId));
+        if (workflowRunId.Value == Guid.Empty) throw new ArgumentException("Workflow-run identity must be non-empty.", nameof(workflowRunId));
+        if (sourceRecordId.Value == Guid.Empty) throw new ArgumentException("Source-record identity must be non-empty.", nameof(sourceRecordId));
         CandidateId = candidateId;
         WorkflowRunId = workflowRunId;
         SourceRecordId = sourceRecordId;

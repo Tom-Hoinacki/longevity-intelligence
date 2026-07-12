@@ -40,6 +40,16 @@ public sealed class PostgresClaimCandidateValidationPersistence(NpgsqlDataSource
             throw new ArgumentException("At least one validation result is required.", nameof(updates));
         }
 
+        if (updates.Any(update => update is null || update.Candidate.WorkflowRunId != workflowRunId))
+        {
+            throw new ArgumentException("Every validation update must belong to the requested workflow run.", nameof(updates));
+        }
+
+        if (updates.Select(update => (update.Candidate.CandidateId, update.Candidate.WorkflowRunId, update.Candidate.CandidateVersion, update.Candidate.CandidateOrdinal)).Distinct().Count() != updates.Count)
+        {
+            throw new ArgumentException("Validation updates cannot contain duplicate candidate identities.", nameof(updates));
+        }
+
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         try

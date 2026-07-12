@@ -25,6 +25,27 @@ public sealed class ValidatingWorkflowRunPhaseHandler(
             throw new InvalidOperationException("No complete candidate batch exists for the claimed workflow run.");
         }
 
+        if (candidates.Any(candidate => candidate is null))
+        {
+            throw new InvalidOperationException("The candidate batch contains a null candidate.");
+        }
+
+        if (candidates.Any(candidate => candidate.WorkflowRunId != claimedRun.WorkflowRunId))
+        {
+            throw new InvalidOperationException("A candidate does not belong to the claimed workflow run.");
+        }
+
+        var latestVersion = candidates.Max(candidate => candidate.CandidateVersion);
+        if (candidates.Any(candidate => candidate.CandidateVersion != latestVersion))
+        {
+            throw new InvalidOperationException("The candidate batch contains multiple candidate versions.");
+        }
+
+        if (candidates.Select(candidate => (candidate.CandidateId, candidate.WorkflowRunId, candidate.CandidateVersion, candidate.CandidateOrdinal)).Distinct().Count() != candidates.Count)
+        {
+            throw new InvalidOperationException("The candidate batch contains duplicate candidate identities.");
+        }
+
         var ordered = candidates
             .OrderBy(candidate => candidate.CandidateVersion)
             .ThenBy(candidate => candidate.CandidateOrdinal)
@@ -32,11 +53,6 @@ public sealed class ValidatingWorkflowRunPhaseHandler(
         var updates = new List<ClaimCandidateValidationUpdate>(ordered.Length);
         foreach (var candidate in ordered)
         {
-            if (candidate.WorkflowRunId != claimedRun.WorkflowRunId)
-            {
-                throw new InvalidOperationException("A candidate does not belong to the claimed workflow run.");
-            }
-
             var result = await validator.ValidateAsync(candidate, cancellationToken);
             updates.Add(new ClaimCandidateValidationUpdate(candidate, result));
         }

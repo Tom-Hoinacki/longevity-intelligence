@@ -52,6 +52,12 @@ public sealed class ClaimExtractionContractsTests
     }
 
     [Fact]
+    public void Null_candidate_entries_are_rejected()
+    {
+        Assert.Throws<ArgumentException>(() => new ClaimExtractionResult([null!], Metadata()));
+    }
+
+    [Fact]
     public void Candidates_preserve_output_order_use_one_based_ordinals_and_claimed_version()
     {
         var claim = Claim(version: 7);

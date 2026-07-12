@@ -35,15 +35,15 @@ public sealed class ValidatingWorkflowRunPhaseHandlerTests
     public async Task Candidates_are_validated_in_version_then_ordinal_order()
     {
         var run = Claim();
-        var candidates = new[] { Candidate(run, 2, 2), Candidate(run, 1, 2), Candidate(run, 1, 1) };
+        var candidates = new[] { Candidate(run, 1, 2), Candidate(run, 1, 1), Candidate(run, 1, 3) };
         var validator = new FakeValidator();
         var persistence = new FakePersistence { Candidates = candidates };
 
         await new ValidatingWorkflowRunPhaseHandler(validator, persistence).HandleAsync(run, CancellationToken.None);
 
-        Assert.Equal([1, 1, 2], validator.Seen.Select(candidate => candidate.CandidateVersion));
-        Assert.Equal([1, 2, 2], validator.Seen.Select(candidate => candidate.CandidateOrdinal));
-        Assert.Equal([1, 1, 2], persistence.Updates!.Select(update => update.Candidate.CandidateVersion));
+        Assert.Equal([1, 1, 1], validator.Seen.Select(candidate => candidate.CandidateVersion));
+        Assert.Equal([1, 2, 3], validator.Seen.Select(candidate => candidate.CandidateOrdinal));
+        Assert.Equal([1, 1, 1], persistence.Updates!.Select(update => update.Candidate.CandidateVersion));
     }
 
     [Fact]
@@ -70,6 +70,37 @@ public sealed class ValidatingWorkflowRunPhaseHandlerTests
 
         Assert.Equal(WorkflowState.ValidationFailed, result.TargetState);
         Assert.Equal(2, validator.Calls);
+    }
+
+    [Fact]
+    public async Task Mixed_candidate_versions_are_rejected_before_validation()
+    {
+        var run = Claim();
+        var validator = new FakeValidator();
+        var persistence = new FakePersistence { Candidates = [Candidate(run, 1, 1), Candidate(run, 2, 1)] };
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new ValidatingWorkflowRunPhaseHandler(validator, persistence).HandleAsync(run, CancellationToken.None));
+
+        Assert.Contains("multiple candidate versions", exception.Message);
+        Assert.Equal(0, validator.Calls);
+        Assert.Equal(0, persistence.PersistCalls);
+    }
+
+    [Fact]
+    public async Task Duplicate_candidate_identities_are_rejected_before_validation()
+    {
+        var run = Claim();
+        var candidateId = new ClaimCandidateId(Guid.NewGuid());
+        var first = new ClaimCandidateForValidation(candidateId, run.WorkflowRunId, new SourceRecordId(Guid.NewGuid()), 1, 1, "one", "{}");
+        var second = new ClaimCandidateForValidation(candidateId, run.WorkflowRunId, first.SourceRecordId, 1, 1, "two", "{}");
+        var validator = new FakeValidator();
+        var persistence = new FakePersistence { Candidates = [first, second] };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new ValidatingWorkflowRunPhaseHandler(validator, persistence).HandleAsync(run, CancellationToken.None));
+        Assert.Equal(0, validator.Calls);
+        Assert.Equal(0, persistence.PersistCalls);
     }
 
     [Fact]

@@ -91,6 +91,10 @@ public sealed record ClaimExtractionResult
         ClaimExtractionExecutionMetadata metadata)
     {
         Candidates = candidates ?? throw new ArgumentNullException(nameof(candidates));
+        if (Candidates.Any(candidate => candidate is null))
+        {
+            throw new ArgumentException("An extraction candidate collection cannot contain null entries.", nameof(candidates));
+        }
         Metadata = metadata ?? throw new ArgumentNullException(nameof(metadata));
     }
 
@@ -113,6 +117,10 @@ public sealed record ClaimExtractionPersistenceRequest
         ClaimedRun = claimedRun;
         Source = source;
         Extraction = extraction ?? throw new ArgumentNullException(nameof(extraction));
+        if (extraction.Candidates.Any(candidate => candidate is null))
+        {
+            throw new ArgumentException("An extraction candidate collection cannot contain null entries.", nameof(extraction));
+        }
         Candidates = extraction.Candidates
             .Select((candidate, index) => new ClaimExtractionCandidateRow(
                 claimedRun.WorkflowRunId,
