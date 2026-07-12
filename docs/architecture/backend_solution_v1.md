@@ -2,12 +2,12 @@
 
 The solution uses direct project references while the backend is one deployable system:
 
-`Longevity.Api` → `Longevity.Application` → `Longevity.Domain`
-`Longevity.Api` → `Longevity.Infrastructure` → `Longevity.Application` and `Longevity.Domain`
+`Longevity.Api` -> `Longevity.Application` -> `Longevity.Domain`
+`Longevity.Api` -> `Longevity.Infrastructure` -> `Longevity.Application` and `Longevity.Domain`
 
 - **Domain** holds workflow vocabulary and invariants only.
 - **Application** owns provider-independent use-case contracts.
-- **Infrastructure** is the future home for Postgres, model-provider, telemetry, and scientific-source adapters.
+- **Infrastructure** is the home for Postgres persistence foundations and the future model-provider, telemetry, and scientific-source adapters.
 - **Api** composes the host, health endpoints, logging, configuration, and orchestrator shell.
 - **UnitTests** covers Domain and Application without live integrations.
 

@@ -1,4 +1,4 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
@@ -16,6 +16,8 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{EF5C9BAD-5BB5-493D-898B-C5A455AFC369}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Longevity.UnitTests", "tests\Longevity.UnitTests\Longevity.UnitTests.csproj", "{5C5DDC4F-48F7-4FAE-85A5-05570FD85CB5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Longevity.Infrastructure.Tests", "tests\Longevity.Infrastructure.Tests\Longevity.Infrastructure.Tests.csproj", "{0C7ED534-9C4D-4109-B38D-7F3C0FB8F2E5}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -46,6 +48,10 @@ Global
 		{5C5DDC4F-48F7-4FAE-85A5-05570FD85CB5}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5C5DDC4F-48F7-4FAE-85A5-05570FD85CB5}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{5C5DDC4F-48F7-4FAE-85A5-05570FD85CB5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0C7ED534-9C4D-4109-B38D-7F3C0FB8F2E5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0C7ED534-9C4D-4109-B38D-7F3C0FB8F2E5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0C7ED534-9C4D-4109-B38D-7F3C0FB8F2E5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0C7ED534-9C4D-4109-B38D-7F3C0FB8F2E5}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{DB52E1EE-7BE7-4583-9449-44C321531764} = {B09E21B4-7629-456C-AA6C-201226EA9E51}
@@ -53,5 +59,6 @@ Global
 		{455696A2-E33A-46EA-AA03-FA5C24DD253D} = {B09E21B4-7629-456C-AA6C-201226EA9E51}
 		{9B1E56F5-3724-43B4-BF43-5A7F0A26BCE8} = {B09E21B4-7629-456C-AA6C-201226EA9E51}
 		{5C5DDC4F-48F7-4FAE-85A5-05570FD85CB5} = {EF5C9BAD-5BB5-493D-898B-C5A455AFC369}
+		{0C7ED534-9C4D-4109-B38D-7F3C0FB8F2E5} = {EF5C9BAD-5BB5-493D-898B-C5A455AFC369}
 	EndGlobalSection
 EndGlobal

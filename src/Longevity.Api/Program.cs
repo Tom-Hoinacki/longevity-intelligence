@@ -11,7 +11,7 @@ builder.Logging.AddSimpleConsole(options =>
 });
 
 builder.Services.AddLongevityApplication();
-builder.Services.AddLongevityInfrastructure();
+builder.Services.AddLongevityInfrastructure(builder.Configuration);
 builder.Services.AddWorkflowOrchestrator(builder.Configuration);
 builder.Services.AddHostedService<WorkflowOrchestratorBackgroundService>();
 

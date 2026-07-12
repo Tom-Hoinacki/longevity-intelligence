@@ -1,4 +1,5 @@
 using Longevity.Application.Orchestration;
+using Longevity.Infrastructure.Persistence;
 
 namespace Longevity.Api.DependencyInjection;
 
@@ -9,8 +10,9 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    public static IServiceCollection AddLongevityInfrastructure(this IServiceCollection services)
+    public static IServiceCollection AddLongevityInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
+        services.AddPostgresPersistence(configuration);
         return services;
     }
 
