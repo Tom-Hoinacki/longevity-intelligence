@@ -1,5 +1,6 @@
 using Longevity.Api.DependencyInjection;
 using Longevity.Api.Diagnostics;
+using Longevity.Api.HumanReview;
 using Longevity.Api.Workflow;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -16,9 +17,11 @@ builder.Services.AddLongevityInfrastructure(builder.Configuration);
 builder.Services.AddWorkflowOrchestrator(builder.Configuration);
 builder.Services.AddHostedService<WorkflowOrchestratorBackgroundService>();
 builder.Services.AddLongevityDiagnostics(builder.Configuration);
+builder.Services.AddHumanReviewApi(builder.Configuration);
 
 var app = builder.Build();
 
 app.MapLongevityDiagnostics();
+app.MapHumanReviewApi();
 
 app.Run();

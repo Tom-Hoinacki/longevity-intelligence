@@ -73,9 +73,9 @@ public sealed class HumanReviewServiceTests
     public async Task Missing_batch_is_reported_without_sensitive_input()
     {
         var persistence = new FakePersistence();
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => Service(persistence).DecideAsync(Request(Run(), note: "private reviewer note"), default));
+        var exception = await Assert.ThrowsAsync<HumanReviewNotFoundException>(() => Service(persistence).DecideAsync(Request(Run(), note: "private reviewer note"), default));
         Assert.DoesNotContain("private reviewer note", exception.ToString(), StringComparison.Ordinal);
-        Assert.Equal(1, persistence.LoadCalls); Assert.Equal(0, persistence.AppendCalls);
+        Assert.Equal(1, persistence.DecisionLoadCalls); Assert.Equal(1, persistence.LoadCalls); Assert.Equal(1, persistence.ExistsCalls); Assert.Equal(0, persistence.AppendCalls);
     }
 
     [Fact]
@@ -84,10 +84,10 @@ public sealed class HumanReviewServiceTests
         var requestedRun = Run();
         var persistence = new FakePersistence { Batch = Batch(Run()) };
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var exception = await Assert.ThrowsAsync<HumanReviewDataIntegrityException>(() =>
             Service(persistence).DecideAsync(Request(requestedRun), default));
 
-        Assert.Equal("Pending human review does not match the requested workflow.", exception.Message);
+        Assert.Equal("Pending human-review data is invalid.", exception.Message);
         Assert.Equal(1, persistence.LoadCalls);
         Assert.Equal(0, persistence.AppendCalls);
     }
@@ -108,6 +108,46 @@ public sealed class HumanReviewServiceTests
     {
         var run = Run(); var expected = Result(run); var persistence = new FakePersistence { Batch = Batch(run), Result = expected };
         Assert.Same(expected, await Service(persistence).DecideAsync(Request(run), default));
+    }
+
+    [Fact]
+    public async Task Identical_stored_decision_retry_returns_durable_result_without_loading_pending_batch()
+    {
+        var run = Run();
+        var stored = Stored(run);
+        var persistence = new FakePersistence { StoredDecision = stored };
+
+        var result = await Service(persistence).DecideAsync(Request(run), default);
+
+        Assert.Equal(stored.ToResult(), result);
+        Assert.Equal(1, persistence.DecisionLoadCalls);
+        Assert.Equal(0, persistence.LoadCalls);
+        Assert.Equal(0, persistence.AppendCalls);
+    }
+
+    [Fact]
+    public async Task Conflicting_stored_decision_identity_is_rejected_without_loading_pending_batch()
+    {
+        var run = Run();
+        var persistence = new FakePersistence { StoredDecision = Stored(run, reviewer: "different-reviewer") };
+
+        await Assert.ThrowsAsync<HumanReviewConflictException>(() => Service(persistence).DecideAsync(Request(run), default));
+
+        Assert.Equal(1, persistence.DecisionLoadCalls);
+        Assert.Equal(0, persistence.LoadCalls);
+        Assert.Equal(0, persistence.AppendCalls);
+    }
+
+    [Fact]
+    public async Task Existing_nonpending_workflow_is_reported_as_conflict()
+    {
+        var persistence = new FakePersistence { WorkflowExists = true };
+
+        await Assert.ThrowsAsync<HumanReviewConflictException>(() => Service(persistence).DecideAsync(Request(Run()), default));
+
+        Assert.Equal(1, persistence.LoadCalls);
+        Assert.Equal(1, persistence.ExistsCalls);
+        Assert.Equal(0, persistence.AppendCalls);
     }
 
     [Fact]
@@ -141,21 +181,24 @@ public sealed class HumanReviewServiceTests
     }
 
     private static async Task AssertInvalidBeforeCalls(HumanReviewDecisionRequest request, FakePersistence persistence) { await Assert.ThrowsAsync<ArgumentException>(() => Service(persistence).DecideAsync(request, default)); AssertNoCalls(persistence); }
-    private static void AssertNoCalls(FakePersistence persistence) { Assert.Equal(0, persistence.LoadCalls); Assert.Equal(0, persistence.AppendCalls); }
+    private static void AssertNoCalls(FakePersistence persistence) { Assert.Equal(0, persistence.DecisionLoadCalls); Assert.Equal(0, persistence.LoadCalls); Assert.Equal(0, persistence.ExistsCalls); Assert.Equal(0, persistence.AppendCalls); }
     private static HumanReviewService Service(FakePersistence persistence) => new(persistence, new FixedTimeProvider(Now));
     private static WorkflowRunId Run() => new(Guid.NewGuid());
     private static PendingHumanReviewBatch Batch(WorkflowRunId run, int version = 9) => new(run, version, WorkflowState.AwaitingHumanApproval, [new(new(Guid.NewGuid()), run, new(Guid.NewGuid()), 1, 1, "sensitive claim text", "{\"private\":true}", new(true, "{}"))]);
     private static HumanReviewDecisionRequest Request(WorkflowRunId run, HumanReviewDecision decision = HumanReviewDecision.Approve, string reviewer = "reviewer", string decisionId = "decision", string? reason = null, string? note = null) => new(run, decision, reviewer, decisionId, reason, note);
     private static HumanReviewDecisionResult Result(WorkflowRunId run, HumanReviewDecision decision = HumanReviewDecision.Approve, WorkflowState? target = null) => new(run, "decision", decision, target ?? WorkflowState.Approved, Now);
+    private static StoredHumanReviewDecision Stored(WorkflowRunId run, string reviewer = "reviewer") => new(run, 1, 9, "decision", HumanReviewDecision.Approve, reviewer, null, null, Now, WorkflowState.Approved);
 
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider { public override DateTimeOffset GetUtcNow() => now; }
     private sealed class FakePersistence : IHumanReviewPersistence
     {
-        public PendingHumanReviewBatch? Batch { get; init; } public HumanReviewDecisionResult? Result { get; init; }
-        public Exception? LoadException { get; init; } public Exception? AppendException { get; init; }
-        public int LoadCalls { get; private set; } public int AppendCalls { get; private set; }
+        public PendingHumanReviewBatch? Batch { get; init; } public HumanReviewDecisionResult? Result { get; init; } public StoredHumanReviewDecision? StoredDecision { get; init; } public bool WorkflowExists { get; init; }
+        public Exception? LoadException { get; init; } public Exception? AppendException { get; init; } public Exception? DecisionLoadException { get; init; }
+        public int DecisionLoadCalls { get; private set; } public int LoadCalls { get; private set; } public int ExistsCalls { get; private set; } public int AppendCalls { get; private set; }
         public WorkflowRunId LoadedRun { get; private set; } public CancellationToken LoadToken { get; private set; } public CancellationToken AppendToken { get; private set; }
         public HumanReviewPersistenceRequest? Appended { get; private set; }
+        public Task<StoredHumanReviewDecision?> LoadDecisionAsync(string decisionId, CancellationToken cancellationToken) { DecisionLoadCalls++; if (DecisionLoadException is not null) throw DecisionLoadException; return Task.FromResult(StoredDecision); }
+        public Task<bool> WorkflowRunExistsAsync(WorkflowRunId workflowRunId, CancellationToken cancellationToken) { ExistsCalls++; return Task.FromResult(WorkflowExists); }
         public Task<PendingHumanReviewBatch?> LoadPendingAsync(WorkflowRunId workflowRunId, CancellationToken cancellationToken) { LoadCalls++; LoadedRun = workflowRunId; LoadToken = cancellationToken; if (LoadException is not null) throw LoadException; return Task.FromResult(Batch); }
         public Task<HumanReviewDecisionResult> AppendDecisionAsync(HumanReviewPersistenceRequest request, CancellationToken cancellationToken) { AppendCalls++; Appended = request; AppendToken = cancellationToken; if (AppendException is not null) throw AppendException; return Task.FromResult(Result!); }
     }
