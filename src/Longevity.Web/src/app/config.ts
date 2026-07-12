@@ -1,0 +1,1 @@
+export type RuntimeConfig={apiBaseUrl:string;demoMode:boolean}; export const runtimeConfig:RuntimeConfig={apiBaseUrl:import.meta.env.VITE_API_BASE_URL??'',demoMode:!import.meta.env.VITE_API_BASE_URL};
