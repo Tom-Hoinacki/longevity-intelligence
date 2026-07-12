@@ -26,6 +26,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Longevity.Infrastructure\Longevity.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Longevity.Api\Longevity.Api.csproj" />
   </ItemGroup>
 
 </Project>

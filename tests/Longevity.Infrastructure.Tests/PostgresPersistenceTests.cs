@@ -5,6 +5,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using Longevity.Api.DependencyInjection;
+using Longevity.Application.Orchestration;
 
 namespace Longevity.Infrastructure.Tests;
 
@@ -323,11 +325,67 @@ public sealed class PostgresPersistenceTests
             && descriptor.ImplementationType == typeof(PostgresClaimCandidateValidationPersistence));
     }
 
+    [Fact]
+    public void Application_registration_adds_exactly_extracting_and_validating_handlers_only()
+    {
+        var services = new ServiceCollection();
+
+        services.AddLongevityApplication();
+
+        var handlers = services.Where(descriptor => descriptor.ServiceType == typeof(IWorkflowRunPhaseHandler)).ToArray();
+        Assert.Equal(2, handlers.Length);
+        Assert.Contains(handlers, descriptor => descriptor.ImplementationType == typeof(ExtractingWorkflowRunPhaseHandler));
+        Assert.Contains(handlers, descriptor => descriptor.ImplementationType == typeof(ValidatingWorkflowRunPhaseHandler));
+        Assert.DoesNotContain(services, descriptor => descriptor.ServiceType == typeof(IWorkflowRunProcessor));
+    }
+
+    [Fact]
+    public void Registered_handlers_resolve_when_fake_application_dependencies_are_supplied()
+    {
+        var services = new ServiceCollection();
+        services.AddLongevityApplication();
+        services.AddSingleton<IClaimExtractionModel, TestExtractionModel>();
+        services.AddSingleton<IClaimExtractionPersistence, TestExtractionPersistence>();
+        services.AddSingleton<IClaimCandidateValidator, TestValidator>();
+        services.AddSingleton<IClaimCandidateValidationPersistence, TestValidationPersistence>();
+
+        using var provider = services.BuildServiceProvider();
+        var handlers = provider.GetServices<IWorkflowRunPhaseHandler>().ToArray();
+
+        Assert.Equal(2, handlers.Length);
+        Assert.Contains(handlers, handler => handler is ExtractingWorkflowRunPhaseHandler);
+        Assert.Contains(handlers, handler => handler is ValidatingWorkflowRunPhaseHandler);
+    }
+
     private static IConfiguration BuildConfiguration(params (string Key, string Value)[] values)
     {
         var data = values.Select(pair => new KeyValuePair<string, string?>(pair.Key, pair.Value));
         return new ConfigurationBuilder()
             .AddInMemoryCollection(data)
             .Build();
+    }
+
+    private sealed class TestExtractionModel : IClaimExtractionModel
+    {
+        public Task<ClaimExtractionResult> ExtractAsync(NormalizedScientificSource source, CancellationToken cancellationToken) =>
+            Task.FromResult(new ClaimExtractionResult([], new ClaimExtractionExecutionMetadata("schema", "provider", "model", "prompt")));
+    }
+
+    private sealed class TestExtractionPersistence : IClaimExtractionPersistence
+    {
+        public Task<NormalizedScientificSource?> LoadNormalizedSourceAsync(WorkflowRunId workflowRunId, CancellationToken cancellationToken) => Task.FromResult<NormalizedScientificSource?>(null);
+        public Task PersistExtractionAsync(ClaimExtractionPersistenceRequest request, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class TestValidator : IClaimCandidateValidator
+    {
+        public Task<DeterministicValidationResult> ValidateAsync(ClaimCandidateForValidation candidate, CancellationToken cancellationToken) =>
+            Task.FromResult(new DeterministicValidationResult(true, "{}"));
+    }
+
+    private sealed class TestValidationPersistence : IClaimCandidateValidationPersistence
+    {
+        public Task<IReadOnlyList<ClaimCandidateForValidation>> LoadLatestCandidateBatchAsync(WorkflowRunId workflowRunId, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<ClaimCandidateForValidation>>([]);
+        public Task PersistValidationResultsAsync(WorkflowRunId workflowRunId, IReadOnlyList<ClaimCandidateValidationUpdate> updates, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

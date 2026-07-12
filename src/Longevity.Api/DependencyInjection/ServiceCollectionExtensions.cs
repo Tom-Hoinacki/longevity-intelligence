@@ -1,4 +1,5 @@
 using Longevity.Application.Orchestration;
+using Longevity.Application.Contracts;
 using Longevity.Infrastructure.Persistence;
 
 namespace Longevity.Api.DependencyInjection;
@@ -7,6 +8,8 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddLongevityApplication(this IServiceCollection services)
     {
+        services.AddSingleton<IWorkflowRunPhaseHandler, ExtractingWorkflowRunPhaseHandler>();
+        services.AddSingleton<IWorkflowRunPhaseHandler, ValidatingWorkflowRunPhaseHandler>();
         return services;
     }
 
