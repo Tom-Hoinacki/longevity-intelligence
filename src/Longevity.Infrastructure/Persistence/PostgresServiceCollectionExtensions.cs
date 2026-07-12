@@ -41,6 +41,7 @@ public static class PostgresServiceCollectionExtensions
                 return new NpgsqlDataSourceBuilder(options.ConnectionString!).Build();
             });
             services.AddSingleton<IWorkflowRunRepository, PostgresWorkflowRunRepository>();
+            services.AddSingleton<IClaimExtractionPersistence, PostgresClaimExtractionPersistence>();
         }
 
         return services;

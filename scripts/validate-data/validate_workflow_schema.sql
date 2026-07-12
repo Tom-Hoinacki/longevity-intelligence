@@ -379,6 +379,19 @@ validation_checks as (
     union all
 
     select
+        'one_source_record_per_workflow_run',
+        exists (
+            select 1
+            from pg_index i
+            where i.indexrelid = to_regclass('workflow.workflow_source_records_workflow_run_unique_idx')
+              and i.indisunique
+              and pg_get_indexdef(i.indexrelid) like '%(workflow_run_id)%'
+        ),
+        'unique workflow_run_id'
+
+    union all
+
+    select
         'runnable_work_index_definition',
         exists (
             select 1

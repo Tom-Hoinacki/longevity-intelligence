@@ -251,6 +251,41 @@ public sealed class PostgresPersistenceTests
             && descriptor.ImplementationType == typeof(PostgresWorkflowRunRepository));
     }
 
+    [Fact]
+    public void Extraction_persistence_sql_is_parameterized_and_maps_audit_fields()
+    {
+        Assert.Contains("WHERE workflow_run_id = $1", ClaimExtractionPersistencePolicy.LoadNormalizedSourceSql);
+        Assert.Contains("candidate_version", ClaimExtractionPersistencePolicy.InsertClaimCandidateSql);
+        Assert.Contains("candidate_ordinal", ClaimExtractionPersistencePolicy.InsertClaimCandidateSql);
+        Assert.Contains("structured_candidate", ClaimExtractionPersistencePolicy.InsertClaimCandidateSql);
+        Assert.Contains("$15", ClaimExtractionPersistencePolicy.InsertClaimCandidateSql);
+        Assert.DoesNotContain("{", ClaimExtractionPersistencePolicy.InsertClaimCandidateSql);
+    }
+
+    [Fact]
+    public void Extraction_persistence_registration_follows_postgres_enablement()
+    {
+        var disabled = new ServiceCollection();
+        disabled.AddPostgresPersistence(BuildConfiguration());
+        Assert.DoesNotContain(disabled, descriptor => descriptor.ServiceType == typeof(IClaimExtractionPersistence));
+
+        var enabled = new ServiceCollection();
+        enabled.AddPostgresPersistence(BuildConfiguration(
+            ("Postgres:Enabled", "true"),
+            ("Postgres:ConnectionString", "Host=localhost;Username=test;Password=test;Database=test")));
+        Assert.Contains(enabled, descriptor => descriptor.ServiceType == typeof(IClaimExtractionPersistence)
+            && descriptor.ImplementationType == typeof(PostgresClaimExtractionPersistence));
+    }
+
+    [Fact]
+    public void Candidate_persistence_policy_declares_explicit_transaction_boundary_in_adapter()
+    {
+        var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "Longevity.Infrastructure", "Persistence", "PostgresClaimExtractionPersistence.cs"));
+        Assert.Contains("BeginTransactionAsync", source);
+        Assert.Contains("CommitAsync", source);
+        Assert.Contains("OpenConnectionAsync", source);
+    }
+
     private static IConfiguration BuildConfiguration(params (string Key, string Value)[] values)
     {
         var data = values.Select(pair => new KeyValuePair<string, string?>(pair.Key, pair.Value));
