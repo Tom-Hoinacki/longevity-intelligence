@@ -49,6 +49,7 @@ public interface IWorkflowRunRepository
     Task<WorkflowRunCompletionResult> CompleteClaimedPhaseAsync(
         WorkflowRunId workflowRunId,
         WorkflowState expectedCurrentState,
+        WorkflowState requestedTargetState,
         int expectedVersion,
         CancellationToken cancellationToken);
 

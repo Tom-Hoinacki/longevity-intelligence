@@ -26,10 +26,11 @@ public sealed class PostgresWorkflowRunRepository(NpgsqlDataSource dataSource) :
     public async Task<WorkflowRunCompletionResult> CompleteClaimedPhaseAsync(
         WorkflowRunId workflowRunId,
         WorkflowState expectedCurrentState,
+        WorkflowState requestedTargetState,
         int expectedVersion,
         CancellationToken cancellationToken)
     {
-        var targetState = WorkflowRunClaimPolicy.GetCompletionTarget(expectedCurrentState);
+        var targetState = WorkflowRunClaimPolicy.GetCompletionTarget(expectedCurrentState, requestedTargetState);
         if (expectedVersion < 1)
         {
             throw new ArgumentOutOfRangeException(nameof(expectedVersion), expectedVersion, "Expected workflow version must be at least 1.");

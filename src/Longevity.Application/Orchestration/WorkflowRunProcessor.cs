@@ -12,6 +12,13 @@ public sealed class WorkflowRunProcessor : IWorkflowRunProcessor
         WorkflowState.Publishing
     };
 
+    private static readonly IReadOnlySet<WorkflowState> TerminalCompletionStates = new HashSet<WorkflowState>
+    {
+        WorkflowState.NoCandidateExtracted,
+        WorkflowState.ValidationFailed,
+        WorkflowState.Published
+    };
+
     private readonly IWorkflowRunRepository repository;
     private readonly IReadOnlyDictionary<WorkflowState, IWorkflowRunPhaseHandler> handlers;
     private readonly TimeProvider timeProvider;
@@ -55,9 +62,10 @@ public sealed class WorkflowRunProcessor : IWorkflowRunProcessor
         }
 
         var handler = handlers[claimedRun.State];
+        WorkflowRunPhaseHandlingResult handlingResult;
         try
         {
-            await handler.HandleAsync(claimedRun, cancellationToken);
+            handlingResult = await handler.HandleAsync(claimedRun, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -89,13 +97,16 @@ public sealed class WorkflowRunProcessor : IWorkflowRunProcessor
         var completion = await repository.CompleteClaimedPhaseAsync(
             claimedRun.WorkflowRunId,
             claimedRun.State,
+            handlingResult.TargetState,
             claimedRun.Version,
             cancellationToken);
 
         return new WorkflowRunProcessorResult(
-            completion.Status == WorkflowRunCompletionStatus.Completed
-                ? WorkflowRunProcessorStatus.Completed
-                : WorkflowRunProcessorStatus.Conflict,
+            completion.Status == WorkflowRunCompletionStatus.Conflict
+                ? WorkflowRunProcessorStatus.Conflict
+                : TerminalCompletionStates.Contains(handlingResult.TargetState)
+                    ? WorkflowRunProcessorStatus.TerminalOutcome
+                    : WorkflowRunProcessorStatus.Completed,
             completion.WorkflowRunId,
             completion.State,
             completion.Version);

@@ -21,14 +21,14 @@ public sealed class WorkflowProcessorContractTests
 
         Assert.Equal(WorkflowState.Extracting, handler.State);
         Assert.Contains(nameof(IWorkflowRunPhaseHandler.HandleAsync), typeof(IWorkflowRunPhaseHandler).GetMethods().Select(method => method.Name));
-        Assert.Equal(typeof(Task), typeof(IWorkflowRunPhaseHandler).GetMethod(nameof(IWorkflowRunPhaseHandler.HandleAsync))!.ReturnType);
+        Assert.Equal(typeof(Task<WorkflowRunPhaseHandlingResult>), typeof(IWorkflowRunPhaseHandler).GetMethod(nameof(IWorkflowRunPhaseHandler.HandleAsync))!.ReturnType);
     }
 
     [Fact]
     public void Processor_outcomes_expose_all_required_statuses()
     {
         Assert.Equal(
-            ["NoWork", "Completed", "RetryScheduled", "TerminalFailure", "Conflict"],
+            ["NoWork", "Completed", "TerminalOutcome", "RetryScheduled", "TerminalFailure", "Conflict"],
             Enum.GetNames<WorkflowRunProcessorStatus>());
         Assert.Equal(WorkflowRunProcessorStatus.NoWork, WorkflowRunProcessorResult.NoWork().Status);
     }
@@ -37,6 +37,7 @@ public sealed class WorkflowProcessorContractTests
     {
         public WorkflowState State => WorkflowState.Extracting;
 
-        public Task HandleAsync(ClaimedWorkflowRun claimedRun, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task<WorkflowRunPhaseHandlingResult> HandleAsync(ClaimedWorkflowRun claimedRun, CancellationToken cancellationToken) =>
+            Task.FromResult(new WorkflowRunPhaseHandlingResult(State));
     }
 }

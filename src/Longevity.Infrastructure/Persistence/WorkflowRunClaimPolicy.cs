@@ -37,13 +37,21 @@ public static class WorkflowRunClaimPolicy
         RETURNING run.id, run.state, run.version;
         """;
 
-    public static IReadOnlyDictionary<string, string> CompletionTransitions { get; } =
-        new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [WorkflowState.Extracting.DatabaseValue] = WorkflowState.CandidateExtracted.DatabaseValue,
-            [WorkflowState.Validating.DatabaseValue] = WorkflowState.AwaitingHumanApproval.DatabaseValue,
-            [WorkflowState.Publishing.DatabaseValue] = WorkflowState.Published.DatabaseValue
-        };
+    public static IReadOnlyList<(string Source, string Target)> CompletionTransitions { get; } =
+    [
+        (WorkflowState.Extracting.DatabaseValue, WorkflowState.CandidateExtracted.DatabaseValue),
+        (WorkflowState.Extracting.DatabaseValue, WorkflowState.NoCandidateExtracted.DatabaseValue),
+        (WorkflowState.Validating.DatabaseValue, WorkflowState.AwaitingHumanApproval.DatabaseValue),
+        (WorkflowState.Validating.DatabaseValue, WorkflowState.ValidationFailed.DatabaseValue),
+        (WorkflowState.Publishing.DatabaseValue, WorkflowState.Published.DatabaseValue)
+    ];
+
+    private static IReadOnlySet<string> TerminalCompletionTargets { get; } = new HashSet<string>(StringComparer.Ordinal)
+    {
+        WorkflowState.NoCandidateExtracted.DatabaseValue,
+        WorkflowState.ValidationFailed.DatabaseValue,
+        WorkflowState.Published.DatabaseValue
+    };
 
     public static IReadOnlyDictionary<string, string> FailureRetryTransitions { get; } =
         new Dictionary<string, string>(StringComparer.Ordinal)
@@ -66,7 +74,7 @@ public static class WorkflowRunClaimPolicy
         SET state = $4,
             updated_at = now(),
             completed_at = CASE
-                WHEN $2 = 'publishing' AND $4 = 'published' THEN now()
+                WHEN $4 IN ('no_candidate_extracted', 'validation_failed', 'published') THEN now()
                 ELSE completed_at
             END,
             version = version + 1
@@ -106,15 +114,22 @@ public static class WorkflowRunClaimPolicy
         RETURNING id, state, version, retry_count;
         """;
 
-    public static string GetCompletionTarget(WorkflowState expectedCurrentState)
+    public static string GetCompletionTarget(WorkflowState expectedCurrentState, WorkflowState requestedTargetState)
     {
         ArgumentNullException.ThrowIfNull(expectedCurrentState);
+        ArgumentNullException.ThrowIfNull(requestedTargetState);
 
-        return CompletionTransitions.TryGetValue(expectedCurrentState.DatabaseValue, out var targetState)
-            ? targetState
+        return CompletionTransitions.Contains((expectedCurrentState.DatabaseValue, requestedTargetState.DatabaseValue))
+            ? requestedTargetState.DatabaseValue
             : throw new ArgumentException(
-                $"Workflow state '{expectedCurrentState.DatabaseValue}' does not have a supported completion transition.",
-                nameof(expectedCurrentState));
+                $"Workflow transition '{expectedCurrentState.DatabaseValue}' to '{requestedTargetState.DatabaseValue}' is not supported.",
+                nameof(requestedTargetState));
+    }
+
+    public static bool IsTerminalCompletionTarget(WorkflowState targetState)
+    {
+        ArgumentNullException.ThrowIfNull(targetState);
+        return TerminalCompletionTargets.Contains(targetState.DatabaseValue);
     }
 
     public static string GetFailureRetryTarget(WorkflowState expectedCurrentState)

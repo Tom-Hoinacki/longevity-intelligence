@@ -64,6 +64,21 @@ public sealed class WorkflowRunProcessorTests
         Assert.Equal(WorkflowRunProcessorStatus.Conflict, result.Status);
     }
 
+    [Theory]
+    [InlineData("extracting", "no_candidate_extracted")]
+    [InlineData("validating", "validation_failed")]
+    public async Task Terminal_phase_outcomes_are_returned(string source, string target)
+    {
+        var run = Claim(WorkflowState.FromDatabaseValue(source));
+        var repository = new FakeRepository(run);
+
+        var result = await CreateProcessor(repository,
+            new RecordingHandler(run.State, WorkflowState.FromDatabaseValue(target))).ProcessNextAsync(CancellationToken.None);
+
+        Assert.Equal(WorkflowRunProcessorStatus.TerminalOutcome, result.Status);
+        Assert.Equal(WorkflowState.FromDatabaseValue(target), repository.CompletedTarget);
+    }
+
     [Fact]
     public async Task Handler_failure_schedules_retry_with_fake_time_and_sanitized_summary()
     {
@@ -167,30 +182,35 @@ public sealed class WorkflowRunProcessorTests
 
     private static ClaimedWorkflowRun Claim(WorkflowState state) => new(new WorkflowRunId(Guid.NewGuid()), state, 8);
 
-    private sealed class RecordingHandler(WorkflowState state) : IWorkflowRunPhaseHandler
+    private sealed class RecordingHandler(WorkflowState state, WorkflowState? requestedTarget = null) : IWorkflowRunPhaseHandler
     {
         public WorkflowState State => state;
         public int Calls { get; private set; }
         public ClaimedWorkflowRun? ReceivedRun { get; private set; }
-        public Task HandleAsync(ClaimedWorkflowRun claimedRun, CancellationToken cancellationToken)
+        public Task<WorkflowRunPhaseHandlingResult> HandleAsync(ClaimedWorkflowRun claimedRun, CancellationToken cancellationToken)
         {
             Calls++;
             ReceivedRun = claimedRun;
-            return Task.CompletedTask;
+            var target = requestedTarget ?? (State == WorkflowState.Extracting
+                ? WorkflowState.CandidateExtracted
+                : State == WorkflowState.Validating
+                    ? WorkflowState.AwaitingHumanApproval
+                    : WorkflowState.Published);
+            return Task.FromResult(new WorkflowRunPhaseHandlingResult(target));
         }
     }
 
     private sealed class ThrowingHandler(WorkflowState state) : IWorkflowRunPhaseHandler
     {
         public WorkflowState State => state;
-        public Task HandleAsync(ClaimedWorkflowRun claimedRun, CancellationToken cancellationToken) =>
+        public Task<WorkflowRunPhaseHandlingResult> HandleAsync(ClaimedWorkflowRun claimedRun, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("secret details");
     }
 
     private sealed class CancellingHandler(WorkflowState state, CancellationTokenSource source) : IWorkflowRunPhaseHandler
     {
         public WorkflowState State => state;
-        public Task HandleAsync(ClaimedWorkflowRun claimedRun, CancellationToken cancellationToken)
+        public Task<WorkflowRunPhaseHandlingResult> HandleAsync(ClaimedWorkflowRun claimedRun, CancellationToken cancellationToken)
         {
             source.Cancel();
             throw new OperationCanceledException(cancellationToken);
@@ -207,15 +227,17 @@ public sealed class WorkflowRunProcessorTests
         public WorkflowRunCompletionResult Completion { get; set; } = new(WorkflowRunCompletionStatus.Completed, claimed?.WorkflowRunId ?? new WorkflowRunId(Guid.Empty), WorkflowState.CandidateExtracted, 9);
         public WorkflowRunFailureResult Failure { get; set; } = new(WorkflowRunFailureStatus.RetryScheduled, claimed?.WorkflowRunId ?? new WorkflowRunId(Guid.Empty), WorkflowState.SourceNormalized, 9, 1);
         public ClaimedWorkflowRun? CompletedRun { get; private set; }
+        public WorkflowState? CompletedTarget { get; private set; }
         public ClaimedWorkflowRun? FailedRun { get; private set; }
         public DateTimeOffset RetryAt { get; private set; }
         public string? FailureSummary { get; private set; }
         public int CompletionCalls { get; private set; }
         public Task<ClaimedWorkflowRun?> TryClaimNextRunnableAsync(CancellationToken cancellationToken) => Task.FromResult(claimed);
-        public Task<WorkflowRunCompletionResult> CompleteClaimedPhaseAsync(WorkflowRunId id, WorkflowState state, int version, CancellationToken cancellationToken)
+        public Task<WorkflowRunCompletionResult> CompleteClaimedPhaseAsync(WorkflowRunId id, WorkflowState state, WorkflowState target, int version, CancellationToken cancellationToken)
         {
             CompletionCalls++;
             CompletedRun = new(id, state, version);
+            CompletedTarget = target;
             return Task.FromResult(Completion);
         }
         public Task<WorkflowRunFailureResult> FailClaimedPhaseAsync(WorkflowRunId id, WorkflowState state, int version, DateTimeOffset retryAt, string? summary, CancellationToken cancellationToken)

@@ -11,13 +11,16 @@ public interface IWorkflowRunPhaseHandler
 {
     WorkflowState State { get; }
 
-    Task HandleAsync(ClaimedWorkflowRun claimedRun, CancellationToken cancellationToken);
+    Task<WorkflowRunPhaseHandlingResult> HandleAsync(ClaimedWorkflowRun claimedRun, CancellationToken cancellationToken);
 }
+
+public sealed record WorkflowRunPhaseHandlingResult(WorkflowState TargetState);
 
 public enum WorkflowRunProcessorStatus
 {
     NoWork,
     Completed,
+    TerminalOutcome,
     RetryScheduled,
     TerminalFailure,
     Conflict

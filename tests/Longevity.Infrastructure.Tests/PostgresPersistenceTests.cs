@@ -44,19 +44,21 @@ public sealed class PostgresPersistenceTests
     [Fact]
     public void Completion_policy_maps_all_supported_transitions()
     {
-        Assert.Equal("candidate_extracted", WorkflowRunClaimPolicy.CompletionTransitions["extracting"]);
-        Assert.Equal("awaiting_human_approval", WorkflowRunClaimPolicy.CompletionTransitions["validating"]);
-        Assert.Equal("published", WorkflowRunClaimPolicy.CompletionTransitions["publishing"]);
-        Assert.Equal(3, WorkflowRunClaimPolicy.CompletionTransitions.Count);
+        Assert.Contains(("extracting", "candidate_extracted"), WorkflowRunClaimPolicy.CompletionTransitions);
+        Assert.Contains(("extracting", "no_candidate_extracted"), WorkflowRunClaimPolicy.CompletionTransitions);
+        Assert.Contains(("validating", "awaiting_human_approval"), WorkflowRunClaimPolicy.CompletionTransitions);
+        Assert.Contains(("validating", "validation_failed"), WorkflowRunClaimPolicy.CompletionTransitions);
+        Assert.Contains(("publishing", "published"), WorkflowRunClaimPolicy.CompletionTransitions);
+        Assert.Equal(5, WorkflowRunClaimPolicy.CompletionTransitions.Count);
     }
 
     [Fact]
     public void Completion_policy_rejects_unsupported_transitions()
     {
         var exception = Assert.Throws<ArgumentException>(() =>
-            WorkflowRunClaimPolicy.GetCompletionTarget(WorkflowState.Received));
+            WorkflowRunClaimPolicy.GetCompletionTarget(WorkflowState.Received, WorkflowState.Published));
 
-        Assert.Contains("does not have a supported completion transition", exception.Message);
+        Assert.Contains("is not supported", exception.Message);
     }
 
     [Fact]
@@ -102,7 +104,7 @@ public sealed class PostgresPersistenceTests
     public void Completion_sql_is_parameterized_and_updates_completion_timestamp_only_for_publishing()
     {
         Assert.Contains("$1", WorkflowRunClaimPolicy.CompleteClaimedPhaseSql);
-        Assert.Contains("$2 = 'publishing' AND $4 = 'published'", WorkflowRunClaimPolicy.CompleteClaimedPhaseSql);
+        Assert.Contains("$4 IN ('no_candidate_extracted', 'validation_failed', 'published')", WorkflowRunClaimPolicy.CompleteClaimedPhaseSql);
         Assert.Contains("THEN now()", WorkflowRunClaimPolicy.CompleteClaimedPhaseSql);
         Assert.Contains("ELSE completed_at", WorkflowRunClaimPolicy.CompleteClaimedPhaseSql);
         Assert.Contains("RETURNING id, state, version", WorkflowRunClaimPolicy.CompleteClaimedPhaseSql);
