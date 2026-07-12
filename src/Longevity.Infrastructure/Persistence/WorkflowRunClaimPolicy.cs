@@ -45,6 +45,22 @@ public static class WorkflowRunClaimPolicy
             [WorkflowState.Publishing.DatabaseValue] = WorkflowState.Published.DatabaseValue
         };
 
+    public static IReadOnlyDictionary<string, string> FailureRetryTransitions { get; } =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [WorkflowState.Extracting.DatabaseValue] = WorkflowState.SourceNormalized.DatabaseValue,
+            [WorkflowState.Validating.DatabaseValue] = WorkflowState.CandidateExtracted.DatabaseValue,
+            [WorkflowState.Publishing.DatabaseValue] = WorkflowState.Approved.DatabaseValue
+        };
+
+    public static IReadOnlyDictionary<string, string> FailureTerminalTransitions { get; } =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [WorkflowState.Extracting.DatabaseValue] = WorkflowState.NoCandidateExtracted.DatabaseValue,
+            [WorkflowState.Validating.DatabaseValue] = WorkflowState.ValidationFailed.DatabaseValue,
+            [WorkflowState.Publishing.DatabaseValue] = WorkflowState.PublicationFailed.DatabaseValue
+        };
+
     public const string CompleteClaimedPhaseSql = """
         UPDATE workflow.runs
         SET state = $4,
@@ -60,6 +76,36 @@ public static class WorkflowRunClaimPolicy
         RETURNING id, state, version;
         """;
 
+    public const string FailClaimedPhaseSql = """
+        UPDATE workflow.runs
+        SET state = CASE
+                WHEN retry_count + 1 < max_retries THEN $4
+                ELSE $5
+            END,
+            retry_count = CASE
+                WHEN retry_count + 1 < max_retries THEN retry_count + 1
+                ELSE max_retries
+            END,
+            available_at = CASE
+                WHEN retry_count + 1 < max_retries THEN $6
+                ELSE available_at
+            END,
+            last_error_summary = CASE
+                WHEN $7 IS NULL THEN last_error_summary
+                ELSE NULLIF(left(btrim($7), 200), '')
+            END,
+            completed_at = CASE
+                WHEN retry_count + 1 < max_retries THEN completed_at
+                ELSE now()
+            END,
+            updated_at = now(),
+            version = version + 1
+        WHERE id = $1
+          AND state = $2
+          AND version = $3
+        RETURNING id, state, version, retry_count;
+        """;
+
     public static string GetCompletionTarget(WorkflowState expectedCurrentState)
     {
         ArgumentNullException.ThrowIfNull(expectedCurrentState);
@@ -68,6 +114,28 @@ public static class WorkflowRunClaimPolicy
             ? targetState
             : throw new ArgumentException(
                 $"Workflow state '{expectedCurrentState.DatabaseValue}' does not have a supported completion transition.",
+                nameof(expectedCurrentState));
+    }
+
+    public static string GetFailureRetryTarget(WorkflowState expectedCurrentState)
+    {
+        ArgumentNullException.ThrowIfNull(expectedCurrentState);
+
+        return FailureRetryTransitions.TryGetValue(expectedCurrentState.DatabaseValue, out var targetState)
+            ? targetState
+            : throw new ArgumentException(
+                $"Workflow state '{expectedCurrentState.DatabaseValue}' does not have a supported failure retry transition.",
+                nameof(expectedCurrentState));
+    }
+
+    public static string GetFailureTerminalTarget(WorkflowState expectedCurrentState)
+    {
+        ArgumentNullException.ThrowIfNull(expectedCurrentState);
+
+        return FailureTerminalTransitions.TryGetValue(expectedCurrentState.DatabaseValue, out var targetState)
+            ? targetState
+            : throw new ArgumentException(
+                $"Workflow state '{expectedCurrentState.DatabaseValue}' does not have a supported failure terminal transition.",
                 nameof(expectedCurrentState));
     }
 }

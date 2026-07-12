@@ -60,6 +60,35 @@ public sealed class PostgresPersistenceTests
     }
 
     [Fact]
+    public void Failure_policy_maps_all_supported_retry_transitions()
+    {
+        Assert.Equal("source_normalized", WorkflowRunClaimPolicy.GetFailureRetryTarget(WorkflowState.Extracting));
+        Assert.Equal("candidate_extracted", WorkflowRunClaimPolicy.GetFailureRetryTarget(WorkflowState.Validating));
+        Assert.Equal("approved", WorkflowRunClaimPolicy.GetFailureRetryTarget(WorkflowState.Publishing));
+    }
+
+    [Fact]
+    public void Failure_policy_maps_all_supported_terminal_transitions()
+    {
+        Assert.Equal("no_candidate_extracted", WorkflowRunClaimPolicy.GetFailureTerminalTarget(WorkflowState.Extracting));
+        Assert.Equal("validation_failed", WorkflowRunClaimPolicy.GetFailureTerminalTarget(WorkflowState.Validating));
+        Assert.Equal("publication_failed", WorkflowRunClaimPolicy.GetFailureTerminalTarget(WorkflowState.Publishing));
+    }
+
+    [Fact]
+    public void Failure_policy_rejects_unsupported_transitions()
+    {
+        var retryException = Assert.Throws<ArgumentException>(() =>
+            WorkflowRunClaimPolicy.GetFailureRetryTarget(WorkflowState.Received));
+
+        var terminalException = Assert.Throws<ArgumentException>(() =>
+            WorkflowRunClaimPolicy.GetFailureTerminalTarget(WorkflowState.Received));
+
+        Assert.Contains("does not have a supported failure retry transition", retryException.Message);
+        Assert.Contains("does not have a supported failure terminal transition", terminalException.Message);
+    }
+
+    [Fact]
     public void Completion_sql_enforces_expected_identity_state_and_version()
     {
         Assert.Contains("WHERE id = $1", WorkflowRunClaimPolicy.CompleteClaimedPhaseSql);
@@ -80,6 +109,30 @@ public sealed class PostgresPersistenceTests
     }
 
     [Fact]
+    public void Failure_sql_enforces_expected_identity_state_and_version()
+    {
+        Assert.Contains("WHERE id = $1", WorkflowRunClaimPolicy.FailClaimedPhaseSql);
+        Assert.Contains("AND state = $2", WorkflowRunClaimPolicy.FailClaimedPhaseSql);
+        Assert.Contains("AND version = $3", WorkflowRunClaimPolicy.FailClaimedPhaseSql);
+        Assert.Contains("SET state = CASE", WorkflowRunClaimPolicy.FailClaimedPhaseSql);
+        Assert.Contains("retry_count = CASE", WorkflowRunClaimPolicy.FailClaimedPhaseSql);
+        Assert.Contains("version = version + 1", WorkflowRunClaimPolicy.FailClaimedPhaseSql);
+    }
+
+    [Fact]
+    public void Failure_sql_is_parameterized_and_updates_retry_and_terminal_columns()
+    {
+        Assert.Contains("$4", WorkflowRunClaimPolicy.FailClaimedPhaseSql);
+        Assert.Contains("$5", WorkflowRunClaimPolicy.FailClaimedPhaseSql);
+        Assert.Contains("$6", WorkflowRunClaimPolicy.FailClaimedPhaseSql);
+        Assert.Contains("$7", WorkflowRunClaimPolicy.FailClaimedPhaseSql);
+        Assert.Contains("retry_count + 1 < max_retries", WorkflowRunClaimPolicy.FailClaimedPhaseSql);
+        Assert.Contains("last_error_summary", WorkflowRunClaimPolicy.FailClaimedPhaseSql);
+        Assert.Contains("completed_at = CASE", WorkflowRunClaimPolicy.FailClaimedPhaseSql);
+        Assert.Contains("RETURNING id, state, version, retry_count", WorkflowRunClaimPolicy.FailClaimedPhaseSql);
+    }
+
+    [Fact]
     public void Conflict_result_is_clear_and_not_successful()
     {
         var result = WorkflowRunCompletionResult.Conflict(new WorkflowRunId(Guid.NewGuid()));
@@ -88,6 +141,41 @@ public sealed class PostgresPersistenceTests
         Assert.Equal(WorkflowRunCompletionStatus.Conflict, result.Status);
         Assert.Null(result.State);
         Assert.Null(result.Version);
+    }
+
+    [Fact]
+    public void Failure_conflict_result_is_clear_and_not_successful()
+    {
+        var result = WorkflowRunFailureResult.Conflict(new WorkflowRunId(Guid.NewGuid()));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(WorkflowRunFailureStatus.Conflict, result.Status);
+        Assert.Null(result.State);
+        Assert.Null(result.Version);
+        Assert.Null(result.RetryCount);
+    }
+
+    [Fact]
+    public void Failure_result_can_distinguish_retry_scheduled_and_terminal_failure()
+    {
+        var runId = new WorkflowRunId(Guid.NewGuid());
+        var retryScheduled = new WorkflowRunFailureResult(
+            WorkflowRunFailureStatus.RetryScheduled,
+            runId,
+            WorkflowState.SourceNormalized,
+            2,
+            1);
+        var terminalFailure = new WorkflowRunFailureResult(
+            WorkflowRunFailureStatus.TerminalFailure,
+            runId,
+            WorkflowState.ValidationFailed,
+            3,
+            3);
+
+        Assert.True(retryScheduled.Succeeded);
+        Assert.True(terminalFailure.Succeeded);
+        Assert.Equal(WorkflowRunFailureStatus.RetryScheduled, retryScheduled.Status);
+        Assert.Equal(WorkflowRunFailureStatus.TerminalFailure, terminalFailure.Status);
     }
 
     [Fact]
