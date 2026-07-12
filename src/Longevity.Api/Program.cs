@@ -1,4 +1,5 @@
 using Longevity.Api.DependencyInjection;
+using Longevity.Api.Diagnostics;
 using Longevity.Api.Workflow;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -14,11 +15,10 @@ builder.Services.AddLongevityApplication();
 builder.Services.AddLongevityInfrastructure(builder.Configuration);
 builder.Services.AddWorkflowOrchestrator(builder.Configuration);
 builder.Services.AddHostedService<WorkflowOrchestratorBackgroundService>();
+builder.Services.AddLongevityDiagnostics(builder.Configuration);
 
 var app = builder.Build();
 
-app.MapGet("/", () => Results.Ok(new { service = "longevity-api", status = "running" }));
-app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
-app.MapGet("/health/ready", () => Results.Ok(new { status = "ready" }));
+app.MapLongevityDiagnostics();
 
 app.Run();
