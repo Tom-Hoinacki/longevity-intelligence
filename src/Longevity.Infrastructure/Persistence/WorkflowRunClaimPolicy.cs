@@ -36,4 +36,38 @@ public static class WorkflowRunClaimPolicy
         WHERE run.id = next_run.id
         RETURNING run.id, run.state;
         """;
+
+    public static IReadOnlyDictionary<string, string> CompletionTransitions { get; } =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [WorkflowState.Extracting.DatabaseValue] = WorkflowState.CandidateExtracted.DatabaseValue,
+            [WorkflowState.Validating.DatabaseValue] = WorkflowState.AwaitingHumanApproval.DatabaseValue,
+            [WorkflowState.Publishing.DatabaseValue] = WorkflowState.Published.DatabaseValue
+        };
+
+    public const string CompleteClaimedPhaseSql = """
+        UPDATE workflow.runs
+        SET state = $4,
+            updated_at = now(),
+            completed_at = CASE
+                WHEN $2 = 'publishing' AND $4 = 'published' THEN now()
+                ELSE completed_at
+            END,
+            version = version + 1
+        WHERE id = $1
+          AND state = $2
+          AND version = $3
+        RETURNING id, state, version;
+        """;
+
+    public static string GetCompletionTarget(WorkflowState expectedCurrentState)
+    {
+        ArgumentNullException.ThrowIfNull(expectedCurrentState);
+
+        return CompletionTransitions.TryGetValue(expectedCurrentState.DatabaseValue, out var targetState)
+            ? targetState
+            : throw new ArgumentException(
+                $"Workflow state '{expectedCurrentState.DatabaseValue}' does not have a supported completion transition.",
+                nameof(expectedCurrentState));
+    }
 }

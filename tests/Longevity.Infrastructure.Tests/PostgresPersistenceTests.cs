@@ -42,6 +42,55 @@ public sealed class PostgresPersistenceTests
     }
 
     [Fact]
+    public void Completion_policy_maps_all_supported_transitions()
+    {
+        Assert.Equal("candidate_extracted", WorkflowRunClaimPolicy.CompletionTransitions["extracting"]);
+        Assert.Equal("awaiting_human_approval", WorkflowRunClaimPolicy.CompletionTransitions["validating"]);
+        Assert.Equal("published", WorkflowRunClaimPolicy.CompletionTransitions["publishing"]);
+        Assert.Equal(3, WorkflowRunClaimPolicy.CompletionTransitions.Count);
+    }
+
+    [Fact]
+    public void Completion_policy_rejects_unsupported_transitions()
+    {
+        var exception = Assert.Throws<ArgumentException>(() =>
+            WorkflowRunClaimPolicy.GetCompletionTarget(WorkflowState.Received));
+
+        Assert.Contains("does not have a supported completion transition", exception.Message);
+    }
+
+    [Fact]
+    public void Completion_sql_enforces_expected_identity_state_and_version()
+    {
+        Assert.Contains("WHERE id = $1", WorkflowRunClaimPolicy.CompleteClaimedPhaseSql);
+        Assert.Contains("AND state = $2", WorkflowRunClaimPolicy.CompleteClaimedPhaseSql);
+        Assert.Contains("AND version = $3", WorkflowRunClaimPolicy.CompleteClaimedPhaseSql);
+        Assert.Contains("SET state = $4", WorkflowRunClaimPolicy.CompleteClaimedPhaseSql);
+        Assert.Contains("version = version + 1", WorkflowRunClaimPolicy.CompleteClaimedPhaseSql);
+    }
+
+    [Fact]
+    public void Completion_sql_is_parameterized_and_updates_completion_timestamp_only_for_publishing()
+    {
+        Assert.Contains("$1", WorkflowRunClaimPolicy.CompleteClaimedPhaseSql);
+        Assert.Contains("$2 = 'publishing' AND $4 = 'published'", WorkflowRunClaimPolicy.CompleteClaimedPhaseSql);
+        Assert.Contains("THEN now()", WorkflowRunClaimPolicy.CompleteClaimedPhaseSql);
+        Assert.Contains("ELSE completed_at", WorkflowRunClaimPolicy.CompleteClaimedPhaseSql);
+        Assert.Contains("RETURNING id, state, version", WorkflowRunClaimPolicy.CompleteClaimedPhaseSql);
+    }
+
+    [Fact]
+    public void Conflict_result_is_clear_and_not_successful()
+    {
+        var result = WorkflowRunCompletionResult.Conflict(new WorkflowRunId(Guid.NewGuid()));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(WorkflowRunCompletionStatus.Conflict, result.Status);
+        Assert.Null(result.State);
+        Assert.Null(result.Version);
+    }
+
+    [Fact]
     public void Persistence_is_disabled_by_default()
     {
         var services = new ServiceCollection();
