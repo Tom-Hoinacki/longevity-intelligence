@@ -1,0 +1,1 @@
+import {NavLink} from 'react-router-dom'; const links=[['/','Dashboard'],['/assets','Assets'],['/claims','Claims'],['/sources','Sources']]; export function Navigation(){return <nav aria-label="Primary navigation">{links.map(([to,label])=><NavLink key={to} to={to} end={to==='/'}>{label}</NavLink>)}</nav>}

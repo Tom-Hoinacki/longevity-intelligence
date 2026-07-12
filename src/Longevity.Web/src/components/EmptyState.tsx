@@ -1,0 +1,1 @@
+export function EmptyState({label}:{label:string}){return <div className="empty-state"><div className="empty-icon">◌</div><h2>{label} are on the way</h2><p>This area will connect to the evidence registry when the API is online.</p></div>}
