@@ -96,6 +96,28 @@ public sealed class OpenRouterClaimExtractionModelTests
         Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<OpenRouterClaimExtractionOptions>>().Value);
     }
 
+    [Fact]
+    public void Registration_resolves_contract_with_transient_typed_client_lifetime()
+    {
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["OpenRouterClaimExtraction:ApiKey"] = "key",
+            ["OpenRouterClaimExtraction:Model"] = "model"
+        }).Build();
+        services.AddOpenRouterClaimExtractionModel(config);
+
+        var registration = Assert.Single(services.Where(service => service.ServiceType == typeof(IClaimExtractionModel)));
+        Assert.Equal(ServiceLifetime.Transient, registration.Lifetime);
+        using var provider = services.BuildServiceProvider();
+        var first = provider.GetRequiredService<IClaimExtractionModel>();
+        var second = provider.GetRequiredService<IClaimExtractionModel>();
+
+        Assert.IsType<OpenRouterClaimExtractionModel>(first);
+        Assert.IsType<OpenRouterClaimExtractionModel>(second);
+        Assert.NotSame(first, second);
+    }
+
     private static OpenRouterClaimExtractionModel Create(RecordingHandler handler, out NormalizedScientificSource source)
     {
         var options = Options.Create(new OpenRouterClaimExtractionOptions { ApiKey = "test-key", Model = "test-model", ApplicationTitle = "Test App", ApplicationUrl = "https://app.example" });

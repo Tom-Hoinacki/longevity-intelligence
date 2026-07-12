@@ -27,6 +27,16 @@ public sealed class HumanReviewServiceTests
         var run = Run(); var persistence = new FakePersistence { Batch = Batch(run), Result = Result(run) };
         await Service(persistence).DecideAsync(Request(run), default);
         Assert.Equal(WorkflowState.Approved, persistence.Appended!.TargetState);
+        Assert.Null(persistence.Appended.Reason);
+    }
+
+    [Fact]
+    public async Task Approval_discards_supplied_rejection_reason()
+    {
+        var run = Run(); var persistence = new FakePersistence { Batch = Batch(run), Result = Result(run) };
+        await Service(persistence).DecideAsync(Request(run, reason: " stale rejection reason "), default);
+        Assert.Null(persistence.Appended!.Reason);
+        Assert.Equal(1, persistence.AppendCalls);
     }
 
     [Fact]
@@ -35,6 +45,7 @@ public sealed class HumanReviewServiceTests
         var run = Run(); var persistence = new FakePersistence { Batch = Batch(run), Result = Result(run, HumanReviewDecision.Reject, WorkflowState.Rejected) };
         await Service(persistence).DecideAsync(Request(run, HumanReviewDecision.Reject, reason: "because"), default);
         Assert.Equal(WorkflowState.Rejected, persistence.Appended!.TargetState);
+        Assert.Equal("because", persistence.Appended.Reason);
     }
 
     [Theory] [InlineData(null)] [InlineData("")] [InlineData("   ")]
@@ -42,6 +53,15 @@ public sealed class HumanReviewServiceTests
     {
         var persistence = new FakePersistence();
         await Assert.ThrowsAsync<ArgumentException>(() => Service(persistence).DecideAsync(Request(Run(), HumanReviewDecision.Reject, reason: reason), default));
+        AssertNoCalls(persistence);
+    }
+
+    [Fact]
+    public async Task Undefined_decision_is_rejected_before_persistence()
+    {
+        var persistence = new FakePersistence();
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            Service(persistence).DecideAsync(Request(Run(), (HumanReviewDecision)42), default));
         AssertNoCalls(persistence);
     }
 
@@ -56,6 +76,20 @@ public sealed class HumanReviewServiceTests
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => Service(persistence).DecideAsync(Request(Run(), note: "private reviewer note"), default));
         Assert.DoesNotContain("private reviewer note", exception.ToString(), StringComparison.Ordinal);
         Assert.Equal(1, persistence.LoadCalls); Assert.Equal(0, persistence.AppendCalls);
+    }
+
+    [Fact]
+    public async Task Mismatched_loaded_workflow_is_rejected_before_append()
+    {
+        var requestedRun = Run();
+        var persistence = new FakePersistence { Batch = Batch(Run()) };
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Service(persistence).DecideAsync(Request(requestedRun), default));
+
+        Assert.Equal("Pending human review does not match the requested workflow.", exception.Message);
+        Assert.Equal(1, persistence.LoadCalls);
+        Assert.Equal(0, persistence.AppendCalls);
     }
 
     [Fact]

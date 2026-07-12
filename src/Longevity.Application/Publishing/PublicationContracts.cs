@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -89,7 +90,40 @@ public static class PublicationCommandFactory
                 .ThenBy(link => link.SourceRecordId.Value)
                 .ThenBy(link => link.EvidenceType, StringComparer.Ordinal));
         var idempotency = $"{batch.WorkflowRunId.Value:N}:{batch.WorkflowRunVersion}";
-        var canonical = JsonSerializer.Serialize(new { snapshot.WorkflowRunId, snapshot.WorkflowRunVersion, source = snapshot.Source.SourceRecordId, claims = snapshot.Claims.Select(c => new { c.CandidateId, c.Ordinal, c.ClaimText, c.StructuredCandidateJson }), links = snapshot.EvidenceLinks });
+        var canonical = JsonSerializer.Serialize(new
+        {
+            workflowRunId = snapshot.WorkflowRunId.Value.ToString("N"),
+            snapshot.WorkflowRunVersion,
+            workflowState = snapshot.WorkflowState.DatabaseValue,
+            snapshot.ApprovalIdentity,
+            approvedAt = snapshot.ApprovedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+            snapshot.ReviewerIdentity,
+            source = new
+            {
+                sourceRecordId = snapshot.Source.SourceRecordId.Value.ToString("N"),
+                workflowRunId = snapshot.Source.WorkflowRunId.Value.ToString("N"),
+                snapshot.Source.IdentityKey,
+                snapshot.Source.Title,
+                snapshot.Source.CanonicalUrl
+            },
+            claims = snapshot.Claims.Select(claim => new
+            {
+                candidateId = claim.CandidateId.Value.ToString("N"),
+                workflowRunId = claim.WorkflowRunId.Value.ToString("N"),
+                sourceRecordId = claim.SourceRecordId.Value.ToString("N"),
+                claim.Ordinal,
+                claim.ClaimText,
+                claim.StructuredCandidateJson,
+                claim.ValidationPassed,
+                claim.HumanApproved
+            }),
+            evidenceLinks = snapshot.EvidenceLinks.Select(link => new
+            {
+                candidateId = link.CandidateId.Value.ToString("N"),
+                sourceRecordId = link.SourceRecordId.Value.ToString("N"),
+                link.EvidenceType
+            })
+        });
         var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
         return new AtomicPublicationCommand(idempotency, fingerprint, snapshot);
     }

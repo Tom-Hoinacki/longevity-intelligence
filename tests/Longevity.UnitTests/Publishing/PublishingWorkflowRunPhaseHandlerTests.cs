@@ -117,6 +117,41 @@ public sealed class PublishingWorkflowRunPhaseHandlerTests
         await RejectsBeforePublish(run, Batch(run, evidenceLinks: []));
     }
 
+    [Fact]
+    public async Task Evidence_link_for_unknown_candidate_is_rejected()
+    {
+        var run = Run(); var batch = Batch(run);
+        var links = batch.EvidenceLinks.Append(new PublicationEvidenceLink(new(Guid.NewGuid()), batch.Source.SourceRecordId, "authoritative-source"));
+        var exception = await RejectsBeforePublish(run, Batch(run, source: batch.Source, claims: batch.Claims, evidenceLinks: links));
+        Assert.Equal("Publication evidence link references a candidate outside the approved batch.", exception.Message);
+    }
+
+    [Fact]
+    public async Task Evidence_link_for_candidate_from_another_batch_is_rejected()
+    {
+        var run = Run(); var batch = Batch(run); var otherBatch = Batch(run);
+        var links = batch.EvidenceLinks.Append(new PublicationEvidenceLink(otherBatch.Claims[0].CandidateId, batch.Source.SourceRecordId, "authoritative-source"));
+        var exception = await RejectsBeforePublish(run, Batch(run, source: batch.Source, claims: batch.Claims, evidenceLinks: links));
+        Assert.Equal("Publication evidence link references a candidate outside the approved batch.", exception.Message);
+    }
+
+    [Fact]
+    public async Task Evidence_link_for_wrong_source_is_rejected()
+    {
+        var run = Run(); var batch = Batch(run);
+        var links = new[] { new PublicationEvidenceLink(batch.Claims[0].CandidateId, new(Guid.NewGuid()), "authoritative-source") };
+        var exception = await RejectsBeforePublish(run, Batch(run, source: batch.Source, claims: batch.Claims, evidenceLinks: links));
+        Assert.Equal("Publication evidence link references a non-authoritative source.", exception.Message);
+    }
+
+    [Fact]
+    public async Task Duplicate_evidence_link_tuple_is_rejected()
+    {
+        var run = Run(); var batch = Batch(run); var link = batch.EvidenceLinks[0];
+        var exception = await RejectsBeforePublish(run, Batch(run, source: batch.Source, claims: batch.Claims, evidenceLinks: [link, link]));
+        Assert.Equal("Publication evidence links contain a duplicate candidate, source, and evidence-type tuple.", exception.Message);
+    }
+
     [Theory]
     [InlineData("not-json")]
     [InlineData("[]")]
@@ -137,6 +172,54 @@ public sealed class PublishingWorkflowRunPhaseHandlerTests
         Assert.Equal(first.IdempotencyKey, second.IdempotencyKey);
         Assert.Equal(first.ContentFingerprint, second.ContentFingerprint);
         Assert.NotEqual(first.ContentFingerprint, changed.ContentFingerprint);
+    }
+
+    [Fact]
+    public void Fingerprint_changes_for_every_persistence_relevant_field()
+    {
+        var baseline = FingerprintBatch();
+        var claim = baseline.Claims[0];
+        var link = baseline.EvidenceLinks[0];
+        var mutations = new (string Name, ApprovedPublicationBatch Batch)[]
+        {
+            ("workflow run ID", FingerprintMutation(baseline, workflowRunId: new(new Guid("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")))),
+            ("workflow version", FingerprintMutation(baseline, workflowRunVersion: baseline.WorkflowRunVersion + 1)),
+            ("workflow state", FingerprintMutation(baseline, workflowState: WorkflowState.Approved)),
+            ("approval identity", FingerprintMutation(baseline, approvalIdentity: "approval-2")),
+            ("approval timestamp", FingerprintMutation(baseline, approvedAt: baseline.ApprovedAt.AddSeconds(1))),
+            ("reviewer identity", FingerprintMutation(baseline, reviewerIdentity: "reviewer-2")),
+            ("source record ID", FingerprintMutation(baseline, source: SourceMutation(baseline.Source, sourceRecordId: new(new Guid("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))))),
+            ("source workflow ID", FingerprintMutation(baseline, source: SourceMutation(baseline.Source, workflowRunId: new(new Guid("cccccccc-cccc-cccc-cccc-cccccccccccc"))))),
+            ("source identity key", FingerprintMutation(baseline, source: SourceMutation(baseline.Source, identityKey: "source-key-2"))),
+            ("source title", FingerprintMutation(baseline, source: SourceMutation(baseline.Source, title: "Changed source title"))),
+            ("source canonical URL", FingerprintMutation(baseline, source: SourceMutation(baseline.Source, canonicalUrl: "https://example.test/changed"))),
+            ("claim candidate ID", FingerprintMutation(baseline, claims: ReplaceFirstClaim(baseline, new(new(new Guid("dddddddd-dddd-dddd-dddd-dddddddddddd")), claim.WorkflowRunId, claim.SourceRecordId, claim.Ordinal, claim.ClaimText, claim.StructuredCandidateJson, claim.ValidationPassed, claim.HumanApproved)))),
+            ("claim workflow ID", FingerprintMutation(baseline, claims: ReplaceFirstClaim(baseline, new(claim.CandidateId, new(new Guid("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")), claim.SourceRecordId, claim.Ordinal, claim.ClaimText, claim.StructuredCandidateJson, claim.ValidationPassed, claim.HumanApproved)))),
+            ("claim source ID", FingerprintMutation(baseline, claims: ReplaceFirstClaim(baseline, new(claim.CandidateId, claim.WorkflowRunId, new(new Guid("ffffffff-ffff-ffff-ffff-ffffffffffff")), claim.Ordinal, claim.ClaimText, claim.StructuredCandidateJson, claim.ValidationPassed, claim.HumanApproved)))),
+            ("claim ordinal", FingerprintMutation(baseline, claims: ReplaceFirstClaim(baseline, new(claim.CandidateId, claim.WorkflowRunId, claim.SourceRecordId, 3, claim.ClaimText, claim.StructuredCandidateJson, claim.ValidationPassed, claim.HumanApproved)))),
+            ("claim text", FingerprintMutation(baseline, claims: ReplaceFirstClaim(baseline, new(claim.CandidateId, claim.WorkflowRunId, claim.SourceRecordId, claim.Ordinal, "Changed claim", claim.StructuredCandidateJson, claim.ValidationPassed, claim.HumanApproved)))),
+            ("claim structured JSON", FingerprintMutation(baseline, claims: ReplaceFirstClaim(baseline, new(claim.CandidateId, claim.WorkflowRunId, claim.SourceRecordId, claim.Ordinal, claim.ClaimText, "{\"changed\":true}", claim.ValidationPassed, claim.HumanApproved)))),
+            ("claim validation flag", FingerprintMutation(baseline, claims: ReplaceFirstClaim(baseline, new(claim.CandidateId, claim.WorkflowRunId, claim.SourceRecordId, claim.Ordinal, claim.ClaimText, claim.StructuredCandidateJson, false, claim.HumanApproved)))),
+            ("claim approval flag", FingerprintMutation(baseline, claims: ReplaceFirstClaim(baseline, new(claim.CandidateId, claim.WorkflowRunId, claim.SourceRecordId, claim.Ordinal, claim.ClaimText, claim.StructuredCandidateJson, claim.ValidationPassed, false)))),
+            ("evidence candidate ID", FingerprintMutation(baseline, evidenceLinks: ReplaceFirstLink(baseline, new(new(new Guid("12121212-1212-1212-1212-121212121212")), link.SourceRecordId, link.EvidenceType)))),
+            ("evidence source ID", FingerprintMutation(baseline, evidenceLinks: ReplaceFirstLink(baseline, new(link.CandidateId, new(new Guid("13131313-1313-1313-1313-131313131313")), link.EvidenceType)))),
+            ("evidence type", FingerprintMutation(baseline, evidenceLinks: ReplaceFirstLink(baseline, new(link.CandidateId, link.SourceRecordId, "supporting-source"))))
+        };
+
+        var original = PublicationCommandFactory.Create(baseline).ContentFingerprint;
+        foreach (var mutation in mutations)
+        {
+            Assert.True(original != PublicationCommandFactory.Create(mutation.Batch).ContentFingerprint, $"Fingerprint did not change for {mutation.Name}.");
+        }
+    }
+
+    [Fact]
+    public void Fingerprint_is_deterministic_for_semantically_unordered_collections()
+    {
+        var forward = FingerprintBatch();
+        var reversed = FingerprintMutation(forward, claims: forward.Claims.Reverse(), evidenceLinks: forward.EvidenceLinks.Reverse());
+
+        Assert.Equal(PublicationCommandFactory.Create(forward).ContentFingerprint, PublicationCommandFactory.Create(reversed).ContentFingerprint);
     }
 
     [Fact]
@@ -198,22 +281,46 @@ public sealed class PublishingWorkflowRunPhaseHandlerTests
         Assert.Throws<NotSupportedException>(() => ((IList<PublicationClaim>)batch.Claims).Clear());
     }
 
-    private static async Task RejectsBeforePublish(ClaimedWorkflowRun run, ApprovedPublicationBatch batch)
+    private static async Task<PublicationInvariantException> RejectsBeforePublish(ClaimedWorkflowRun run, ApprovedPublicationBatch batch)
     {
         var persistence = new FakePersistence { Batch = batch };
-        await Assert.ThrowsAsync<PublicationInvariantException>(() => Handler(persistence).HandleAsync(run, default));
+        var exception = await Assert.ThrowsAsync<PublicationInvariantException>(() => Handler(persistence).HandleAsync(run, default));
         Assert.Equal(0, persistence.PublishCalls);
+        return exception;
     }
 
     private static PublishingWorkflowRunPhaseHandler Handler(FakePersistence persistence) => new(persistence, new FixedTimeProvider(Now));
     private static ClaimedWorkflowRun Run(WorkflowState? state = null) => new(new(Guid.NewGuid()), state ?? WorkflowState.Publishing, 7);
-    private static PublicationSource Source(ClaimedWorkflowRun run, string title = "Source title") => new(new(Guid.NewGuid()), run.WorkflowRunId, "source-key", title, "https://example.test/source");
+    private static PublicationSource Source(ClaimedWorkflowRun run, string title = "Source title", SourceRecordId? sourceRecordId = null, WorkflowRunId? workflowRunId = null, string identityKey = "source-key", string canonicalUrl = "https://example.test/source") => new(sourceRecordId ?? new(Guid.NewGuid()), workflowRunId ?? run.WorkflowRunId, identityKey, title, canonicalUrl);
     private static PublicationClaim Claim(ClaimedWorkflowRun run, PublicationSource source, int ordinal, ClaimCandidateId? id = null, string text = "Evidence claim", string json = "{}", bool validated = true, bool approved = true) => new(id ?? new(Guid.NewGuid()), run.WorkflowRunId, source.SourceRecordId, ordinal, text, json, validated, approved);
     private static IEnumerable<PublicationEvidenceLink> Links(IEnumerable<PublicationClaim> claims, PublicationSource source) => claims.Select(c => new PublicationEvidenceLink(c.CandidateId, source.SourceRecordId, "authoritative-source"));
-    private static ApprovedPublicationBatch Batch(ClaimedWorkflowRun run, WorkflowRunId? workflowRunId = null, int? version = null, string approvalIdentity = "approval-1", DateTimeOffset? approvedAt = null, string reviewerIdentity = "reviewer-1", PublicationSource? source = null, IEnumerable<PublicationClaim>? claims = null, IEnumerable<PublicationEvidenceLink>? evidenceLinks = null)
+    private static ApprovedPublicationBatch FingerprintBatch()
+    {
+        var workflowRunId = new WorkflowRunId(new Guid("11111111-1111-1111-1111-111111111111"));
+        var sourceRecordId = new SourceRecordId(new Guid("22222222-2222-2222-2222-222222222222"));
+        var source = new PublicationSource(sourceRecordId, workflowRunId, "source-key", "Source title", "https://example.test/source");
+        var claims = new[]
+        {
+            new PublicationClaim(new(new Guid("33333333-3333-3333-3333-333333333333")), workflowRunId, sourceRecordId, 1, "First claim", "{\"ordinal\":1}", true, true),
+            new PublicationClaim(new(new Guid("44444444-4444-4444-4444-444444444444")), workflowRunId, sourceRecordId, 2, "Second claim", "{\"ordinal\":2}", true, true)
+        };
+        var links = new[]
+        {
+            new PublicationEvidenceLink(claims[0].CandidateId, sourceRecordId, "authoritative-source"),
+            new PublicationEvidenceLink(claims[1].CandidateId, sourceRecordId, "authoritative-source")
+        };
+        return new(workflowRunId, 7, WorkflowState.Publishing, "approval-1", new DateTimeOffset(2026, 7, 12, 11, 0, 0, TimeSpan.Zero), "reviewer-1", source, claims, links);
+    }
+    private static ApprovedPublicationBatch FingerprintMutation(ApprovedPublicationBatch baseline, WorkflowRunId? workflowRunId = null, int? workflowRunVersion = null, WorkflowState? workflowState = null, string? approvalIdentity = null, DateTimeOffset? approvedAt = null, string? reviewerIdentity = null, PublicationSource? source = null, IEnumerable<PublicationClaim>? claims = null, IEnumerable<PublicationEvidenceLink>? evidenceLinks = null) =>
+        new(workflowRunId ?? baseline.WorkflowRunId, workflowRunVersion ?? baseline.WorkflowRunVersion, workflowState ?? baseline.WorkflowState, approvalIdentity ?? baseline.ApprovalIdentity, approvedAt ?? baseline.ApprovedAt, reviewerIdentity ?? baseline.ReviewerIdentity, source ?? baseline.Source, claims ?? baseline.Claims, evidenceLinks ?? baseline.EvidenceLinks);
+    private static PublicationSource SourceMutation(PublicationSource baseline, SourceRecordId? sourceRecordId = null, WorkflowRunId? workflowRunId = null, string? identityKey = null, string? title = null, string? canonicalUrl = null) =>
+        new(sourceRecordId ?? baseline.SourceRecordId, workflowRunId ?? baseline.WorkflowRunId, identityKey ?? baseline.IdentityKey, title ?? baseline.Title, canonicalUrl ?? baseline.CanonicalUrl);
+    private static IEnumerable<PublicationClaim> ReplaceFirstClaim(ApprovedPublicationBatch baseline, PublicationClaim replacement) => [replacement, .. baseline.Claims.Skip(1)];
+    private static IEnumerable<PublicationEvidenceLink> ReplaceFirstLink(ApprovedPublicationBatch baseline, PublicationEvidenceLink replacement) => [replacement, .. baseline.EvidenceLinks.Skip(1)];
+    private static ApprovedPublicationBatch Batch(ClaimedWorkflowRun run, WorkflowRunId? workflowRunId = null, int? version = null, WorkflowState? workflowState = null, string approvalIdentity = "approval-1", DateTimeOffset? approvedAt = null, string reviewerIdentity = "reviewer-1", PublicationSource? source = null, IEnumerable<PublicationClaim>? claims = null, IEnumerable<PublicationEvidenceLink>? evidenceLinks = null)
     {
         source ??= Source(run); claims ??= [Claim(run, source, 1)]; evidenceLinks ??= Links(claims, source);
-        return new(workflowRunId ?? run.WorkflowRunId, version ?? run.Version, WorkflowState.Publishing, approvalIdentity, approvedAt ?? Now.AddMinutes(-1), reviewerIdentity, source, claims, evidenceLinks);
+        return new(workflowRunId ?? run.WorkflowRunId, version ?? run.Version, workflowState ?? WorkflowState.Publishing, approvalIdentity, approvedAt ?? Now.AddMinutes(-1), reviewerIdentity, source, claims, evidenceLinks);
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider { public override DateTimeOffset GetUtcNow() => now; }

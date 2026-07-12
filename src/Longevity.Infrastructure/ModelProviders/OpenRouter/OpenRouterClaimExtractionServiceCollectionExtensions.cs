@@ -18,7 +18,7 @@ public static class OpenRouterClaimExtractionServiceCollectionExtensions
             client.BaseAddress = new Uri(o.BaseAddress, UriKind.Absolute);
             client.Timeout = o.RequestTimeout;
         });
-        services.AddSingleton<IClaimExtractionModel>(sp => sp.GetRequiredService<OpenRouterClaimExtractionModel>());
+        services.AddTransient<IClaimExtractionModel>(sp => sp.GetRequiredService<OpenRouterClaimExtractionModel>());
         return services;
     }
 }
