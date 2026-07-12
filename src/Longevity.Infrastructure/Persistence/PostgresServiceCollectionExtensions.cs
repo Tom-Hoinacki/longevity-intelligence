@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using Longevity.Application.Contracts;
 
 namespace Longevity.Infrastructure.Persistence;
 
@@ -39,6 +40,7 @@ public static class PostgresServiceCollectionExtensions
                 options.EnsureValid();
                 return new NpgsqlDataSourceBuilder(options.ConnectionString!).Build();
             });
+            services.AddSingleton<IWorkflowRunRepository, PostgresWorkflowRunRepository>();
         }
 
         return services;

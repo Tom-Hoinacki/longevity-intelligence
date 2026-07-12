@@ -5,6 +5,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Longevity.Application\Longevity.Application.csproj" />
     <ProjectReference Include="..\Longevity.Domain\Longevity.Domain.csproj" />
   </ItemGroup>
 
