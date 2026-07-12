@@ -2,6 +2,7 @@ using Longevity.Api.DependencyInjection;
 using Longevity.Api.Diagnostics;
 using Longevity.Api.HumanReview;
 using Longevity.Api.Workflow;
+using Longevity.Api.PublicEvidence;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,16 +13,21 @@ builder.Logging.AddSimpleConsole(options =>
     options.TimestampFormat = "O ";
 });
 
-builder.Services.AddLongevityApplication();
 builder.Services.AddLongevityInfrastructure(builder.Configuration);
-builder.Services.AddWorkflowOrchestrator(builder.Configuration);
-builder.Services.AddHostedService<WorkflowOrchestratorBackgroundService>();
+if (builder.Configuration.GetSection("WorkflowOrchestrator").GetValue<bool>("Enabled"))
+{
+    builder.Services.AddLongevityApplication();
+    builder.Services.AddWorkflowOrchestrator(builder.Configuration);
+    builder.Services.AddHostedService<WorkflowOrchestratorBackgroundService>();
+}
 builder.Services.AddLongevityDiagnostics(builder.Configuration);
 builder.Services.AddHumanReviewApi(builder.Configuration);
+builder.Services.AddPublicEvidenceApi(builder.Configuration);
 
 var app = builder.Build();
 
 app.MapLongevityDiagnostics();
 app.MapHumanReviewApi();
+app.MapPublicEvidenceApi();
 
 app.Run();
