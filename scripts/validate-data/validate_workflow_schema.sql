@@ -305,6 +305,67 @@ validation_checks as (
     union all
 
     select
+        'claim_candidate_ordinal_column',
+        exists (
+            select 1
+            from information_schema.columns
+            where table_schema = 'workflow'
+              and table_name = 'claim_candidates'
+              and column_name = 'candidate_ordinal'
+              and data_type = 'integer'
+              and is_nullable = 'NO'
+        ),
+        coalesce((
+            select data_type || ', nullable=' || is_nullable
+            from information_schema.columns
+            where table_schema = 'workflow'
+              and table_name = 'claim_candidates'
+              and column_name = 'candidate_ordinal'
+        ), 'missing')
+
+    union all
+
+    select
+        'claim_candidate_positive_ordinal_constraint',
+        exists (
+            select 1
+            from workflow_constraint_defs
+            where conname = 'workflow_claim_candidates_ordinal_check'
+              and definition like '%candidate_ordinal%'
+              and definition like '%1%'
+        ),
+        coalesce((
+            select definition
+            from workflow_constraint_defs
+            where conname = 'workflow_claim_candidates_ordinal_check'
+        ), 'missing')
+
+    union all
+
+    select
+        'claim_candidate_version_ordinal_unique_constraint',
+        exists (
+            select 1
+            from workflow_constraint_defs
+            where conname = 'workflow_claim_candidates_source_version_ordinal_key'
+              and contype = 'u'
+              and definition = 'UNIQUE (source_record_id, candidate_version, candidate_ordinal)'
+        )
+        and not exists (
+            select 1
+            from workflow_constraint_defs
+            where conname = 'workflow_claim_candidates_source_version_key'
+              and contype = 'u'
+        ),
+        coalesce((
+            select definition
+            from workflow_constraint_defs
+            where conname = 'workflow_claim_candidates_source_version_ordinal_key'
+        ), 'missing; old two-column constraint must be absent')
+
+    union all
+
+    select
         'stable_source_identity_unique_index',
         exists (
             select 1
