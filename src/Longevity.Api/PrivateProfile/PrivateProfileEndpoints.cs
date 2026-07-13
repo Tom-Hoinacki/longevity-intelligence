@@ -8,7 +8,8 @@ public static class PrivateProfileEndpoints
     public static WebApplication MapPrivateProfileApi(this WebApplication app)
     {
         var group = app.MapGroup("/api/v1/me")
-            .RequireAuthorization()
+            .RequireAuthorization(PrivateProfileAuthorization.PolicyName)
+            .WithMetadata(new RequestSizeLimitAttribute(PrivateProfileAuthorization.MaximumRequestBodyBytes))
             .WithTags("Private Profile");
 
         group.MapGet("/profile", GetProfileAsync);
@@ -185,6 +186,10 @@ public static class PrivateProfileEndpoints
         {
             return Problem("private_profile_unavailable", "Private-profile persistence is unavailable.", StatusCodes.Status503ServiceUnavailable);
         }
+        catch (PrivateProfileSecurityConfigurationException)
+        {
+            return Problem("private_profile_unavailable", "Private-profile database access is not safely configured.", StatusCodes.Status503ServiceUnavailable);
+        }
         catch (PrivateProfileNotFoundException)
         {
             return NotFound("private_profile_not_found", "The requested private-profile resource was not found.");
@@ -197,7 +202,7 @@ public static class PrivateProfileEndpoints
         {
             return Results.Unauthorized();
         }
-        catch (InvalidOperationException)
+        catch (PrivateProfileAuthorizationException)
         {
             return Results.Forbid();
         }
@@ -210,7 +215,7 @@ public static class PrivateProfileEndpoints
     private static IResult? CheckAuthorization(ICurrentUserContext currentUser)
     {
         if (!currentUser.IsAuthenticated) return Results.Unauthorized();
-        return string.IsNullOrWhiteSpace(currentUser.SubjectId) ? Results.Forbid() : null;
+        return PrivateProfileSubject.TryValidate(currentUser.SubjectId, out _) ? null : Results.Forbid();
     }
 
     private static IResult BadRequest(string code, string message) => Results.BadRequest(new PrivateProfileErrorResponse(code, message));

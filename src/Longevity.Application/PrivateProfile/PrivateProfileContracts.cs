@@ -5,6 +5,8 @@ namespace Longevity.Application.PrivateProfile;
 
 public static class PrivateProfileValues
 {
+    public const string SystemDefaultCollectionSource = "system_default";
+
     public const string Metric = "metric";
     public const string Imperial = "imperial";
 
@@ -111,6 +113,11 @@ public static class PrivateProfileValues
     public static readonly IReadOnlySet<string> LabSourceTypes = new HashSet<string>(StringComparer.Ordinal)
     {
         SelfReported, LabReport, Clinician, Imported, Other
+    };
+
+    public static readonly IReadOnlySet<string> LabAbnormalFlags = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "low", "normal", "high", "abnormal", "critical"
     };
 }
 
@@ -409,6 +416,18 @@ public sealed class PrivateProfilePersistenceUnavailableException : Exception
     public PrivateProfilePersistenceUnavailableException() : base("Private-profile persistence is unavailable.") { }
 }
 
+public sealed class PrivateProfileSecurityConfigurationException : Exception
+{
+    public PrivateProfileSecurityConfigurationException()
+        : base("Private-profile database access is not safely configured.") { }
+}
+
+public sealed class PrivateProfileAuthorizationException : Exception
+{
+    public PrivateProfileAuthorizationException()
+        : base("The authenticated private-profile subject is invalid.") { }
+}
+
 public sealed class PrivateProfileConflictException : Exception
 {
     public PrivateProfileConflictException() : base("The private-profile operation conflicts with current state.") { }
@@ -421,6 +440,8 @@ public sealed class PrivateProfileNotFoundException : Exception
 
 public static class PrivateProfileSubject
 {
+    public const int MaximumLength = 200;
+
     public static string Require(ICurrentUserContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -429,12 +450,37 @@ public static class PrivateProfileSubject
             throw new UnauthorizedAccessException();
         }
 
-        if (string.IsNullOrWhiteSpace(context.SubjectId))
+        if (!TryValidate(context.SubjectId, out var subject))
         {
-            throw new InvalidOperationException("The authenticated subject is missing.");
+            throw new PrivateProfileAuthorizationException();
         }
 
-        return context.SubjectId.Trim();
+        return subject;
+    }
+
+    public static string Require(string? value)
+    {
+        if (!TryValidate(value, out var subject))
+        {
+            throw new PrivateProfileAuthorizationException();
+        }
+
+        return subject;
+    }
+
+    public static bool TryValidate(string? value, out string subject)
+    {
+        subject = string.Empty;
+        if (string.IsNullOrWhiteSpace(value)
+            || value.Length > MaximumLength
+            || !string.Equals(value, value.Trim(), StringComparison.Ordinal)
+            || value.Any(char.IsControl))
+        {
+            return false;
+        }
+
+        subject = value;
+        return true;
     }
 }
 

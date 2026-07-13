@@ -1,8 +1,17 @@
 -- Private profile data is intentionally isolated from public evidence and workflow schemas.
-create schema if not exists private_profile;
+-- This migration is intentionally fail-closed: pre-existing names require investigation.
+create role private_profile_api
+    nologin nosuperuser nocreatedb nocreaterole noinherit nobypassrls;
+
+create schema private_profile;
 
 revoke all on schema private_profile from public;
-grant usage on schema private_profile to authenticated, service_role;
+revoke all on schema private_profile from anon, authenticated, service_role;
+grant usage on schema private_profile to private_profile_api;
+
+alter default privileges in schema private_profile revoke all on tables from public, anon, authenticated, service_role;
+alter default privileges in schema private_profile revoke all on sequences from public, anon, authenticated, service_role;
+alter default privileges revoke execute on functions from public, anon, authenticated, service_role;
 
 create table private_profile.profiles (
     profile_id uuid primary key default gen_random_uuid(),
@@ -18,11 +27,13 @@ create table private_profile.profiles (
     constraint private_profiles_subject_check check (
         external_subject_id = btrim(external_subject_id)
         and length(external_subject_id) between 1 and 200
+        and external_subject_id !~ '[[:cntrl:]]'
     ),
     constraint private_profiles_birth_fields_check check (
         not (birth_date is not null and birth_year is not null)
     ),
     constraint private_profiles_birth_year_check check (birth_year is null or birth_year between 1900 and 2100),
+    constraint private_profiles_birth_date_check check (birth_date is null or birth_date >= date '1900-01-01'),
     constraint private_profiles_sex_at_birth_check check (
         sex_at_birth is null
         or sex_at_birth in ('female', 'male', 'intersex', 'unknown', 'not_disclosed')
@@ -48,7 +59,7 @@ create table private_profile.consents (
     granted_at timestamptz,
     withdrawn_at timestamptz,
     collection_source text not null,
-    created_at timestamptz not null default now(),
+    created_at timestamptz not null default clock_timestamp(),
     constraint private_consents_type_check check (
         consent_type in (
             'profile_data_storage',
@@ -68,6 +79,15 @@ create table private_profile.consents (
         and length(policy_version) between 1 and 64
         and collection_source = btrim(collection_source)
         and length(collection_source) between 1 and 64
+    ),
+    constraint private_consents_system_default_check check (
+        collection_source <> 'system_default'
+        or (
+            policy_version = 'foundation-v1'
+            and status = 'declined'
+            and granted_at is null
+            and withdrawn_at is null
+        )
     )
 );
 
@@ -85,12 +105,24 @@ create table private_profile.body_measurements (
         measurement_type = btrim(measurement_type)
         and length(measurement_type) between 1 and 100
     ),
-    constraint private_body_measurements_value_check check (numeric_value > 0),
+    constraint private_body_measurements_value_check check (
+        numeric_value > 0 and numeric_value <= 999999999999.99999999
+    ),
     constraint private_body_measurements_unit_check check (
         unit = btrim(unit) and length(unit) between 1 and 32
     ),
     constraint private_body_measurements_source_check check (
         source_type in ('self_reported', 'lab_report', 'clinician', 'imported', 'other')
+    ),
+    constraint private_body_measurements_known_unit_check check (
+        (measurement_type <> 'weight' or unit in ('kg', 'lb'))
+        and (measurement_type <> 'height' or unit in ('cm', 'in'))
+        and (measurement_type <> 'waist_circumference' or unit in ('cm', 'in'))
+        and (measurement_type <> 'body_fat_percentage' or unit in ('%', 'percent'))
+    ),
+    constraint private_body_measurements_source_label_check check (
+        source_label is null
+        or (source_label = btrim(source_label) and length(source_label) between 1 and 200)
     )
 );
 
@@ -124,10 +156,31 @@ create table private_profile.lab_observations (
     constraint private_lab_source_check check (
         source_type in ('self_reported', 'lab_report', 'clinician', 'imported', 'other')
     ),
+    constraint private_lab_abnormal_flag_check check (
+        abnormal_flag is null or abnormal_flag in ('low', 'normal', 'high', 'abnormal', 'critical')
+    ),
     constraint private_lab_text_check check (
-        (standardized_code_system is null or length(btrim(standardized_code_system)) between 1 and 64)
-        and (standardized_test_code is null or length(btrim(standardized_test_code)) between 1 and 64)
-        and (unit is null or length(btrim(unit)) between 1 and 32)
+        (standardized_code_system is null or (
+            standardized_code_system = btrim(standardized_code_system)
+            and length(standardized_code_system) between 1 and 64
+        ))
+        and (standardized_test_code is null or (
+            standardized_test_code = btrim(standardized_test_code)
+            and length(standardized_test_code) between 1 and 64
+        ))
+        and (text_value is null or (
+            text_value = btrim(text_value)
+            and length(text_value) between 1 and 2000
+        ))
+        and (unit is null or (unit = btrim(unit) and length(unit) between 1 and 32))
+        and (specimen_or_panel_label is null or (
+            specimen_or_panel_label = btrim(specimen_or_panel_label)
+            and length(specimen_or_panel_label) between 1 and 200
+        ))
+        and (source_label is null or (
+            source_label = btrim(source_label)
+            and length(source_label) between 1 and 200
+        ))
     )
 );
 
@@ -181,6 +234,9 @@ create table private_profile.goals (
 
 create index private_consents_profile_created_idx
     on private_profile.consents (profile_id, created_at desc, consent_id desc);
+create unique index private_consents_system_default_unique_idx
+    on private_profile.consents (profile_id, consent_type)
+    where collection_source = 'system_default';
 create index private_body_measurements_profile_observed_idx
     on private_profile.body_measurements (profile_id, observed_at desc, observation_id desc);
 create index private_lab_observations_profile_observed_idx
@@ -194,11 +250,11 @@ language sql
 stable
 set search_path = ''
 as $$
-    select coalesce(
-        nullif(current_setting('app.current_user_subject', true), ''),
-        nullif(current_setting('request.jwt.claim.sub', true), '')
-    )
+    select nullif(current_setting('app.current_user_subject', true), '')
 $$;
+
+revoke all on function private_profile.current_subject() from public, anon, authenticated, service_role;
+grant execute on function private_profile.current_subject() to private_profile_api;
 
 alter table private_profile.profiles enable row level security;
 alter table private_profile.consents enable row level security;
@@ -215,12 +271,12 @@ alter table private_profile.preferences force row level security;
 alter table private_profile.goals force row level security;
 
 create policy private_profiles_owner_policy
-    on private_profile.profiles for all to public
+    on private_profile.profiles for all to private_profile_api
     using (external_subject_id = (select private_profile.current_subject()))
     with check (external_subject_id = (select private_profile.current_subject()));
 
 create policy private_consents_owner_policy
-    on private_profile.consents for all to public
+    on private_profile.consents for all to private_profile_api
     using (exists (
         select 1 from private_profile.profiles p
         where p.profile_id = consents.profile_id
@@ -233,7 +289,7 @@ create policy private_consents_owner_policy
     ));
 
 create policy private_body_measurements_owner_policy
-    on private_profile.body_measurements for all to public
+    on private_profile.body_measurements for all to private_profile_api
     using (exists (
         select 1 from private_profile.profiles p
         where p.profile_id = body_measurements.profile_id
@@ -246,7 +302,7 @@ create policy private_body_measurements_owner_policy
     ));
 
 create policy private_lab_observations_owner_policy
-    on private_profile.lab_observations for all to public
+    on private_profile.lab_observations for all to private_profile_api
     using (exists (
         select 1 from private_profile.profiles p
         where p.profile_id = lab_observations.profile_id
@@ -259,7 +315,7 @@ create policy private_lab_observations_owner_policy
     ));
 
 create policy private_preferences_owner_policy
-    on private_profile.preferences for all to public
+    on private_profile.preferences for all to private_profile_api
     using (exists (
         select 1 from private_profile.profiles p
         where p.profile_id = preferences.profile_id
@@ -272,7 +328,7 @@ create policy private_preferences_owner_policy
     ));
 
 create policy private_goals_owner_policy
-    on private_profile.goals for all to public
+    on private_profile.goals for all to private_profile_api
     using (exists (
         select 1 from private_profile.profiles p
         where p.profile_id = goals.profile_id
@@ -284,12 +340,13 @@ create policy private_goals_owner_policy
           and p.external_subject_id = (select private_profile.current_subject())
     ));
 
-grant execute on function private_profile.current_subject() to authenticated, service_role;
-grant select, insert, update on private_profile.profiles, private_profile.preferences, private_profile.goals to authenticated, service_role;
-grant select, insert on private_profile.consents, private_profile.body_measurements, private_profile.lab_observations to authenticated, service_role;
+revoke all on all tables in schema private_profile from public, anon, authenticated, service_role;
+revoke all on all sequences in schema private_profile from public, anon, authenticated, service_role;
+grant select, insert, update on private_profile.profiles, private_profile.preferences, private_profile.goals to private_profile_api;
+grant select, insert on private_profile.consents, private_profile.body_measurements, private_profile.lab_observations to private_profile_api;
 
 comment on schema private_profile is
-    'Private, profile-owned data plane. Never mix these records with public evidence or workflow data.';
+    'Backend-only, profile-owned data plane. Browser-facing Supabase roles have no access. Never mix these records with public evidence or workflow data.';
 comment on table private_profile.consents is
     'Append-only consent events. The latest event per consent_type is the effective state; history is retained for auditability.';
 comment on table private_profile.body_measurements is

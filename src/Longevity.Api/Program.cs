@@ -28,6 +28,10 @@ builder.Services.AddPrivateProfileApi();
 
 var app = builder.Build();
 
+app.UsePrivateProfileSafeObservability();
+app.UseAuthentication();
+app.UseAuthorization();
+
 app.MapLongevityDiagnostics();
 app.MapHumanReviewApi();
 app.MapPublicEvidenceApi();

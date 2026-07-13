@@ -11,7 +11,18 @@ public sealed class PrivateProfileService(
 {
     private const int DefaultPageSize = 25;
     private const int MaxPageSize = 100;
+    private const decimal MaximumMeasurementValue = 999_999_999_999.99999999m;
+    private const decimal MaximumLabValue = 99_999_999_999_999.9999999999m;
+    private static readonly TimeSpan MaximumFutureObservationSkew = TimeSpan.FromMinutes(5);
     private static readonly Regex CurrencyCode = new("^[A-Z]{3}$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly IReadOnlyDictionary<string, IReadOnlySet<string>> KnownMeasurementUnits =
+        new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal)
+        {
+            [PrivateProfileValues.Weight] = new HashSet<string>(["kg", "lb"], StringComparer.Ordinal),
+            [PrivateProfileValues.Height] = new HashSet<string>(["cm", "in"], StringComparer.Ordinal),
+            [PrivateProfileValues.WaistCircumference] = new HashSet<string>(["cm", "in"], StringComparer.Ordinal),
+            [PrivateProfileValues.BodyFatPercentage] = new HashSet<string>(["%", "percent"], StringComparer.Ordinal)
+        };
 
     public async Task<ProfileResponse> GetOrCreateProfileAsync(CancellationToken cancellationToken)
     {
@@ -170,20 +181,34 @@ public sealed class PrivateProfileService(
 
     private string Subject() => PrivateProfileSubject.Require(currentUser);
 
-    private static ProfileUpdateData ValidateProfile(UpdateProfileRequest request)
+    private ProfileUpdateData ValidateProfile(UpdateProfileRequest request)
     {
+        var currentDate = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
         if (request.BirthDate is not null && request.BirthYear is not null)
             throw new PrivateProfileValidationException("birthDate", "Provide birthDate or birthYear, not both.");
-        if (request.BirthDate is { } birthDate && birthDate > DateOnly.FromDateTime(DateTime.UtcNow))
-            throw new PrivateProfileValidationException("birthDate", "Birth date cannot be in the future.");
-        if (request.BirthYear is < 1900 or > 2100)
-            throw new PrivateProfileValidationException("birthYear", "Birth year must be between 1900 and 2100.");
+        if (request.BirthDate is { } birthDate
+            && (birthDate < new DateOnly(1900, 1, 1) || birthDate > currentDate))
+            throw new PrivateProfileValidationException("birthDate", "Birth date must be between 1900-01-01 and today.");
+        if (request.BirthYear is { } birthYear && (birthYear < 1900 || birthYear > currentDate.Year))
+            throw new PrivateProfileValidationException("birthYear", "Birth year must be between 1900 and the current year.");
 
         var measurementSystem = NormalizeRequired(request.PreferredMeasurementSystem, "preferredMeasurementSystem", 32);
         if (!PrivateProfileValues.MeasurementSystems.Contains(measurementSystem))
             throw new PrivateProfileValidationException("preferredMeasurementSystem", "Measurement system must be metric or imperial.");
 
         var timeZone = NormalizeRequired(request.TimeZone, "timeZone", 64);
+        try
+        {
+            _ = TimeZoneInfo.FindSystemTimeZoneById(timeZone);
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            throw new PrivateProfileValidationException("timeZone", "Time zone is not recognized by the server.");
+        }
+        catch (InvalidTimeZoneException)
+        {
+            throw new PrivateProfileValidationException("timeZone", "Time zone is not recognized by the server.");
+        }
         var sexAtBirth = NormalizeOptional(request.SexAtBirth, "sexAtBirth", 32);
         if (sexAtBirth is not null && !PrivateProfileValues.SexAtBirthValues.Contains(sexAtBirth))
             throw new PrivateProfileValidationException("sexAtBirth", "Sex-at-birth value is not supported.");
@@ -203,7 +228,9 @@ public sealed class PrivateProfileService(
         if (normalizedStatus is not PrivateProfileValues.Granted and not PrivateProfileValues.Declined)
             throw new PrivateProfileValidationException("status", "Consent status must be granted or declined.");
         _ = NormalizeRequired(policyVersion, "policyVersion", 64);
-        _ = NormalizeRequired(collectionSource, "collectionSource", 64);
+        var normalizedSource = NormalizeRequired(collectionSource, "collectionSource", 64);
+        if (normalizedSource == PrivateProfileValues.SystemDefaultCollectionSource)
+            throw new PrivateProfileValidationException("collectionSource", "The reserved system-default source cannot be supplied by a caller.");
     }
 
     private static RecordConsentRequest NormalizeRequest(RecordConsentRequest request) =>
@@ -213,16 +240,20 @@ public sealed class PrivateProfileService(
             NormalizeRequired(request.Status, nameof(request.Status), 16),
             NormalizeRequired(request.CollectionSource, nameof(request.CollectionSource), 64));
 
-    private static BodyMeasurementRequest ValidateMeasurement(BodyMeasurementRequest request)
+    private BodyMeasurementRequest ValidateMeasurement(BodyMeasurementRequest request)
     {
         var type = NormalizeRequired(request.MeasurementType, nameof(request.MeasurementType), 100);
         var unit = NormalizeRequired(request.Unit, nameof(request.Unit), 32);
-        if (request.NumericValue <= 0)
-            throw new PrivateProfileValidationException("numericValue", "Measurement value must be greater than zero.");
+        if (request.NumericValue <= 0 || request.NumericValue > MaximumMeasurementValue)
+            throw new PrivateProfileValidationException("numericValue", "Measurement value is outside the supported database range.");
         if (type == PrivateProfileValues.BodyFatPercentage && request.NumericValue > 100)
             throw new PrivateProfileValidationException("numericValue", "Body-fat percentage must be between 0 and 100.");
+        if (KnownMeasurementUnits.TryGetValue(type, out var supportedUnits) && !supportedUnits.Contains(unit))
+            throw new PrivateProfileValidationException("unit", "Unit is not supported for this measurement type.");
         if (request.ObservedAt == default)
             throw new PrivateProfileValidationException("observedAt", "Observation timestamp is required.");
+        if (request.ObservedAt > timeProvider.GetUtcNow() + MaximumFutureObservationSkew)
+            throw new PrivateProfileValidationException("observedAt", "Observation timestamp is too far in the future.");
         var sourceType = NormalizeRequired(request.SourceType, nameof(request.SourceType), 32);
         if (sourceType is not PrivateProfileValues.SelfReported
             and not PrivateProfileValues.LabReport
@@ -234,12 +265,13 @@ public sealed class PrivateProfileService(
         {
             MeasurementType = type,
             Unit = unit,
+            ObservedAt = request.ObservedAt.ToUniversalTime(),
             SourceType = sourceType,
             SourceLabel = NormalizeOptional(request.SourceLabel, nameof(request.SourceLabel), 200)
         };
     }
 
-    private static LabObservationRequest ValidateLab(LabObservationRequest request)
+    private LabObservationRequest ValidateLab(LabObservationRequest request)
     {
         var testName = NormalizeRequired(request.TestName, nameof(request.TestName), 200);
         if ((request.NumericValue is null) == (string.IsNullOrWhiteSpace(request.TextValue)))
@@ -248,15 +280,23 @@ public sealed class PrivateProfileService(
             && request.ReferenceRangeMaximum is not null
             && request.ReferenceRangeMinimum > request.ReferenceRangeMaximum)
             throw new PrivateProfileValidationException("referenceRangeMinimum", "Reference-range minimum cannot exceed maximum.");
+        ValidateLabNumeric(request.NumericValue, "numericValue");
+        ValidateLabNumeric(request.ReferenceRangeMinimum, "referenceRangeMinimum");
+        ValidateLabNumeric(request.ReferenceRangeMaximum, "referenceRangeMaximum");
         var codeSystem = NormalizeOptional(request.StandardizedCodeSystem, nameof(request.StandardizedCodeSystem), 64);
         var code = NormalizeOptional(request.StandardizedTestCode, nameof(request.StandardizedTestCode), 64);
         if (code is not null && codeSystem is null)
             throw new PrivateProfileValidationException("standardizedCodeSystem", "A code system is required when a standardized test code is provided.");
         if (request.ObservedAt == default)
             throw new PrivateProfileValidationException("observedAt", "Observation timestamp is required.");
+        if (request.ObservedAt > timeProvider.GetUtcNow() + MaximumFutureObservationSkew)
+            throw new PrivateProfileValidationException("observedAt", "Observation timestamp is too far in the future.");
         var sourceType = NormalizeRequired(request.SourceType, nameof(request.SourceType), 32);
         if (!PrivateProfileValues.LabSourceTypes.Contains(sourceType))
             throw new PrivateProfileValidationException("sourceType", "Lab source type is not supported.");
+        var abnormalFlag = NormalizeOptional(request.AbnormalFlag, nameof(request.AbnormalFlag), 16);
+        if (abnormalFlag is not null && !PrivateProfileValues.LabAbnormalFlags.Contains(abnormalFlag))
+            throw new PrivateProfileValidationException("abnormalFlag", "Abnormal flag is not supported.");
         return request with
         {
             TestName = testName,
@@ -264,8 +304,9 @@ public sealed class PrivateProfileService(
             StandardizedTestCode = code,
             TextValue = NormalizeOptional(request.TextValue, nameof(request.TextValue), 2000),
             Unit = NormalizeOptional(request.Unit, nameof(request.Unit), 32),
-            AbnormalFlag = NormalizeOptional(request.AbnormalFlag, nameof(request.AbnormalFlag), 16),
+            AbnormalFlag = abnormalFlag,
             SpecimenOrPanelLabel = NormalizeOptional(request.SpecimenOrPanelLabel, nameof(request.SpecimenOrPanelLabel), 200),
+            ObservedAt = request.ObservedAt.ToUniversalTime(),
             SourceType = sourceType,
             SourceLabel = NormalizeOptional(request.SourceLabel, nameof(request.SourceLabel), 200)
         };
@@ -291,6 +332,12 @@ public sealed class PrivateProfileService(
         if (insurance is not null && !PrivateProfileValues.InsurancePreferenceValues.Contains(insurance))
             throw new PrivateProfileValidationException("insuranceUsePreference", "Insurance-use preference is not supported.");
         return new(request.MonthlyLongevityBudget, currency, risk, evidence, cost, insurance);
+    }
+
+    private static void ValidateLabNumeric(decimal? value, string field)
+    {
+        if (value is < -MaximumLabValue or > MaximumLabValue)
+            throw new PrivateProfileValidationException(field, "Value is outside the supported database range.");
     }
 
     private static CreateGoalRequest ValidateGoal(CreateGoalRequest request)

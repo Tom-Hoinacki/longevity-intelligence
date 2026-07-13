@@ -1,10 +1,13 @@
 using Longevity.Application.PrivateProfile;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 using NpgsqlTypes;
 
 namespace Longevity.Infrastructure.PrivateProfile;
 
-public sealed class PostgresPrivateProfileStore(NpgsqlDataSource dataSource) : IPrivateProfileStore
+public sealed class PostgresPrivateProfileStore(
+    NpgsqlDataSource dataSource,
+    ILogger<PostgresPrivateProfileStore> logger) : IPrivateProfileStore
 {
     private const string DefaultPolicyVersion = "foundation-v1";
 
@@ -81,11 +84,16 @@ public sealed class PostgresPrivateProfileStore(NpgsqlDataSource dataSource) : I
         {
             await EnsureProfileAsync(connection, transaction, externalSubjectId, cancellationToken).ConfigureAwait(false);
             await using var command = Command(connection, transaction, """
+                with owned_profile as (
+                    select p.profile_id
+                    from private_profile.profiles p
+                    where p.external_subject_id = @external_subject_id
+                    for update
+                )
                 insert into private_profile.consents
                     (profile_id, consent_type, policy_version, status, granted_at, withdrawn_at, collection_source)
                 select p.profile_id, @consent_type, @policy_version, @status, @granted_at, @withdrawn_at, @collection_source
-                from private_profile.profiles p
-                where p.external_subject_id = @external_subject_id
+                from owned_profile p
                 returning consent_id, profile_id, consent_type, policy_version, status,
                           granted_at, withdrawn_at, collection_source, created_at
                 """);
@@ -386,24 +394,118 @@ public sealed class PostgresPrivateProfileStore(NpgsqlDataSource dataSource) : I
         Func<NpgsqlConnection, NpgsqlTransaction, Task<T>> action,
         CancellationToken cancellationToken)
     {
+        var subject = PrivateProfileSubject.Require(externalSubjectId);
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-        await using (var command = Command(connection, transaction, "select set_config('app.current_user_subject', @subject, true)"))
-        {
-            Add(command, "subject", NpgsqlDbType.Text, externalSubjectId);
-            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        }
 
         try
         {
+            await ConfigureSecurityContextAsync(connection, transaction, subject, cancellationToken).ConfigureAwait(false);
             var result = await action(connection, transaction).ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return result;
         }
         catch
         {
-            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Preserve the operation failure. Disposal provides a second rollback boundary.
+                logger.LogWarning("Private-profile transaction rollback did not complete cleanly; connection disposal will enforce cleanup.");
+            }
             throw;
+        }
+    }
+
+    private async Task ConfigureSecurityContextAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string subject,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using (var check = Command(connection, transaction, """
+                select coalesce((
+                    select not role.rolsuper
+                       and not role.rolbypassrls
+                       and not role.rolcreaterole
+                       and not role.rolcreatedb
+                       and not role.rolinherit
+                       and current_user = session_user
+                       and nullif(current_setting('app.current_user_subject', true), '') is null
+                       and role.rolname <> 'private_profile_api'
+                       and pg_has_role(session_user, 'private_profile_api', 'set')
+                       and exists (
+                           select 1
+                           from pg_roles boundary
+                           where boundary.rolname = 'private_profile_api'
+                             and not boundary.rolcanlogin
+                             and not boundary.rolsuper
+                             and not boundary.rolbypassrls
+                             and not boundary.rolcreaterole
+                             and not boundary.rolcreatedb
+                             and not boundary.rolinherit
+                             and not exists (
+                                 select 1
+                                 from pg_namespace boundary_namespace
+                                 where boundary_namespace.nspname = 'private_profile'
+                                   and boundary_namespace.nspowner = boundary.oid
+                             )
+                             and not exists (
+                                 select 1
+                                 from pg_class boundary_relation
+                                 join pg_namespace boundary_namespace
+                                   on boundary_namespace.oid = boundary_relation.relnamespace
+                                 where boundary_namespace.nspname = 'private_profile'
+                                   and boundary_relation.relowner = boundary.oid
+                             )
+                       )
+                       and not exists (
+                           select 1
+                           from pg_namespace namespace
+                           where namespace.nspname = 'private_profile'
+                             and namespace.nspowner = role.oid
+                       )
+                       and not exists (
+                           select 1
+                           from pg_class relation
+                           join pg_namespace namespace on namespace.oid = relation.relnamespace
+                           where namespace.nspname = 'private_profile'
+                             and relation.relowner = role.oid
+                       )
+                    from pg_roles role
+                    where role.rolname = session_user
+                ), false)
+                """))
+            {
+                var safelyConfigured = await check.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+                if (safelyConfigured is not true)
+                {
+                    logger.LogError("Private-profile database security-context validation failed.");
+                    throw new PrivateProfileSecurityConfigurationException();
+                }
+            }
+
+            await using (var activateRole = Command(connection, transaction, "set local role private_profile_api"))
+            {
+                await activateRole.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await using (var setSubject = Command(connection, transaction,
+                "select set_config('app.current_user_subject', @subject, true)"))
+            {
+                Add(setSubject, "subject", NpgsqlDbType.Text, subject);
+                await setSubject.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (PostgresException)
+        {
+            logger.LogError("Private-profile database security-context activation failed.");
+            throw new PrivateProfileSecurityConfigurationException();
         }
     }
 
@@ -446,6 +548,7 @@ public sealed class PostgresPrivateProfileStore(NpgsqlDataSource dataSource) : I
                   where c.profile_id = p.profile_id
                     and c.consent_type = defaults.consent_type
               )
+            on conflict do nothing
             """);
         Add(command, "external_subject_id", NpgsqlDbType.Text, externalSubjectId);
         Add(command, "policy_version", NpgsqlDbType.Text, DefaultPolicyVersion);

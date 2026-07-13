@@ -4,6 +4,7 @@ using Longevity.Infrastructure.PrivateProfile;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -78,7 +79,7 @@ public sealed class PrivateProfileFoundationTests
     public async Task Measurement_and_lab_validation_preserves_numeric_and_text_shapes()
     {
         var service = Service(new FakeStore(), "fictional-subject-a");
-        var observedAt = new DateTimeOffset(2026, 7, 12, 8, 0, 0, TimeSpan.Zero);
+        var observedAt = new DateTimeOffset(2026, 7, 12, 1, 0, 0, TimeSpan.FromHours(-7));
 
         await Assert.ThrowsAsync<PrivateProfileValidationException>(() => service.AddMeasurementAsync(
             new(PrivateProfileValues.Weight, 0, "kg", observedAt, PrivateProfileValues.SelfReported, null),
@@ -93,8 +94,10 @@ public sealed class PrivateProfileFoundationTests
 
         Assert.Equal(4.25m, numeric.NumericValue);
         Assert.Null(numeric.TextValue);
+        Assert.Equal(TimeSpan.Zero, numeric.ObservedAt.Offset);
         Assert.Null(text.NumericValue);
         Assert.Equal("negative", text.TextValue);
+        Assert.Equal(TimeSpan.Zero, text.ObservedAt.Offset);
     }
 
     [Fact]
@@ -141,6 +144,25 @@ public sealed class PrivateProfileFoundationTests
     }
 
     [Fact]
+    public async Task Measurements_and_labs_are_not_visible_to_another_subject()
+    {
+        var store = new FakeStore();
+        var owner = Service(store, "fictional-subject-a");
+        var other = Service(store, "fictional-subject-b");
+        var observedAt = new DateTimeOffset(2026, 7, 10, 8, 0, 0, TimeSpan.Zero);
+
+        await owner.AddMeasurementAsync(
+            new(PrivateProfileValues.Weight, 70m, "kg", observedAt, PrivateProfileValues.SelfReported, null),
+            CancellationToken.None);
+        await owner.AddLabAsync(
+            new("Fictional marker", null, null, 1m, null, "mg/L", null, null, "normal", null, observedAt, PrivateProfileValues.LabReport, null),
+            CancellationToken.None);
+
+        Assert.Empty((await other.ListMeasurementsAsync(25, null, CancellationToken.None)).Items);
+        Assert.Empty((await other.ListLabsAsync(25, null, CancellationToken.None)).Items);
+    }
+
+    [Fact]
     public async Task Disabled_postgres_never_returns_fake_persistence()
     {
         var store = new DisabledPrivateProfileStore();
@@ -167,7 +189,8 @@ public sealed class PrivateProfileFoundationTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
         var migration = await File.ReadAllTextAsync(Path.Combine(root, "supabase", "migrations", "20260713000000_private_profile_foundation.sql"));
 
-        Assert.Contains("create schema if not exists private_profile", migration, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("create schema private_profile", migration, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("create schema if not exists private_profile", migration, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("enable row level security", migration, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("force row level security", migration, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("references private_profile.profiles(profile_id) on delete cascade", migration, StringComparison.OrdinalIgnoreCase);
@@ -180,7 +203,7 @@ public sealed class PrivateProfileFoundationTests
     public async Task Private_profile_routes_require_authorization_and_do_not_take_profile_id()
     {
         var builder = WebApplication.CreateBuilder();
-        builder.Services.AddAuthorization();
+        builder.Services.AddPrivateProfileApi();
         await using var app = builder.Build();
         app.MapPrivateProfileApi();
 
@@ -191,7 +214,14 @@ public sealed class PrivateProfileFoundationTests
             .ToArray();
 
         Assert.NotEmpty(routes);
-        Assert.All(routes, route => Assert.NotEmpty(route.Metadata.GetOrderedMetadata<IAuthorizeData>()));
+        Assert.All(routes, route =>
+        {
+            Assert.Contains(route.Metadata.GetOrderedMetadata<IAuthorizeData>(),
+                data => data.Policy == PrivateProfileAuthorization.PolicyName);
+            Assert.Equal(
+                PrivateProfileAuthorization.MaximumRequestBodyBytes,
+                route.Metadata.GetMetadata<IRequestSizeLimitMetadata>()?.MaxRequestBodySize);
+        });
         Assert.DoesNotContain(routes, route => route.RoutePattern.RawText?.Contains("{profileId", StringComparison.Ordinal) == true);
     }
 

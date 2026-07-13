@@ -1,29 +1,47 @@
 # Private profile foundation
 
-The private profile foundation is the first private data plane for personalized Longevity Intelligence. It is deliberately isolated from the public evidence catalog and workflow schema so personal measurements, lab observations, preferences, goals, and consent events cannot become public educational records by an accidental join or fixture.
+The private profile foundation is an isolated data plane for personalized Longevity Intelligence. Personal measurements, lab observations, preferences, goals, and consent events live in the `private_profile` schema; they are not public evidence records and must not be copied into the public educational schema.
 
-## Boundary and data flow
+## Trust boundary and ownership
 
-Authenticated subject → `ICurrentUserContext` → application service → parameterized Postgres store → `private_profile` schema
+The selected access model is backend-only:
 
-The API never accepts a profile ID to determine ownership. The subject comes from the authenticated principal (`sub`, with `NameIdentifier` as a compatibility fallback). Each private record is linked to one profile through a foreign key. The Postgres adapter also sets a transaction-local `app.current_user_subject` value and the migration adds profile-scoped RLS policies.
+Authenticated principal -> ASP.NET Core owner policy -> application service -> parameterized Postgres store -> transaction-local database role and subject -> `private_profile` RLS
 
-The current application host does not configure a production identity provider yet. Private routes still carry authorization metadata and reject unauthenticated or subjectless requests. A real authentication scheme must be wired before exposing these routes to users; there is no impersonating request header.
+The API never accepts a profile or subject identifier to establish ownership. It accepts one authoritative `sub` claim, with `ClaimTypes.NameIdentifier` supported only when an identity provider maps its immutable subject there and no `sub` claim is present. Missing, duplicate, whitespace-padded, control-character, or oversized subjects fail authorization.
 
-## Domain model
+No production identity provider is configured in this foundation. The host registers a reject-all fallback, so the private routes return an authentication challenge until a real scheme is explicitly configured. The test-only `X-Test-Subject` handler exists only in the test assembly and is not referenced by production code.
 
-- `profiles` represents a person independently from an identity provider. Birth date and birth year are mutually exclusive; sex at birth and gender are separate fields.
-- `consents` is append-only. The latest event for a consent type is the effective state, while prior policy versions and withdrawals remain available for audit. The five categories are profile data storage, personalized analysis, research use, de-identified aggregate-data use, and commercial partner matching.
-- `body_measurements` is append-only and preserves the entered numeric value and unit. Known types include weight, height, waist circumference, and body-fat percentage; the text type field supports future types without a new table.
-- `lab_observations` is append-only and accepts either a numeric value or a text value. Standardized code systems and codes are optional so future LOINC support does not make imported or self-reported records invalid.
-- `preferences` has one current row per profile and uses constrained values for risk, evidence confidence, cost-versus-confidence, currency, and insurance preference.
-- `goals` supports multiple active or inactive goals, including a user-defined type, without making treatment or product recommendations.
+## Database access model
 
-Creating or loading a profile creates explicit declined default consent events for all five categories. Optional research, aggregate-data, and commercial-partner consent therefore fail closed. Recording a grant or withdrawal adds another event; it does not overwrite the prior event.
+The migration creates `private_profile_api` as `NOLOGIN`, `NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE`, `NOINHERIT`, and `NOBYPASSRLS`. It is the only role with schema, table, and `current_subject()` privileges, and every RLS policy targets that role. `PUBLIC`, `anon`, `authenticated`, and `service_role` are explicitly revoked. Schema-scoped defaults protect future private tables and sequences. Because PostgreSQL grants function execution to `PUBLIC` globally by default, the migration also removes that default for all future functions created by the migration role; individual public functions must be granted deliberately. Default privileges are creator-role-specific, so every future migration using a different object owner must repeat this review. Browser clients therefore have no direct access to this schema.
 
-## API
+Provisioning must create a separate runtime login outside the repository and grant it membership in `private_profile_api`. The runtime login must be `NOINHERIT`, must not own the schema or its relations, and must not be a superuser, `BYPASSRLS`, `CREATEROLE`, or `CREATEDB`. Its secret belongs in the deployment secret store, never in source control. Configure `Postgres.ConnectionString` to use that login.
 
-All routes are under `/api/v1/me` and require authorization:
+Every store operation:
+
+1. Opens a connection and transaction.
+2. Verifies the pooled session has no leaked role/subject state, both the session login and boundary role remain least-privilege, and the login can explicitly assume `private_profile_api`.
+3. Executes `SET LOCAL ROLE private_profile_api`.
+4. sets `app.current_user_subject` with `set_config(..., true)`.
+5. Executes only parameterized owner-scoped SQL and commits, or rolls back on failure or cancellation.
+
+`SET LOCAL` and the transaction-local setting reset at commit or rollback, including when a physical connection returns to a pool. The subject function deliberately has no JWT-setting fallback. A holder of the trusted backend database credential can assert a subject, so credential protection, connection-string access, and operational database access remain part of the security boundary.
+
+## Data and consent semantics
+
+- `profiles` stores birth date or birth year, never both, with separate sex-at-birth and gender fields.
+- `consents` is append-only. Five explicit declined events are initialized by default. A partial unique index and conflict-safe insert prevent duplicate system defaults under concurrent profile initialization. The reserved `system_default` source cannot be submitted by callers. Explicit consent writes lock the profile row before insertion so writes for one profile are serialized.
+- `body_measurements` is append-only and preserves the submitted numeric value and canonical unit. Known measurement types enforce compatible units; future types remain extensible.
+- `lab_observations` is append-only and accepts exactly one numeric or text value. Input lengths, numeric precision, source values, and abnormal flags are bounded.
+- `preferences` has one current row per profile.
+- `goals` supports multiple bounded, owner-scoped goals without making health or product recommendations.
+
+Birth fields, time zones, numeric ranges, known measurement units, future observation skew, source labels, and consent provenance are validated before persistence. Database constraints provide a second structural boundary. These checks validate data shape only; they do not interpret a result or make a medical claim.
+
+## API and operational behavior
+
+All routes are under `/api/v1/me` and use the `PrivateProfileOwner` policy:
 
 - `GET` / `PUT` `/profile`
 - `GET` / `POST` `/consents`
@@ -34,39 +52,29 @@ All routes are under `/api/v1/me` and require authorization:
 - `GET` / `POST` `/goals`
 - `PATCH` `/goals/{goalId}`
 
-Measurement and lab collection endpoints use bounded cursor pagination (`limit` 1–100) with deterministic ordering by observed timestamp and observation ID. Request and response records are immutable DTOs; database entities are not exposed. Endpoint errors use stable generic responses and never include exception details or private values.
+Measurement and lab lists use bounded cursor pagination with deterministic timestamp/UUID ordering. Request and response records are immutable DTOs and responses never expose the external subject. Private request bodies are limited to 64 KiB. Error responses are stable and omit exception details and submitted values.
 
-## Configuration and migrations
+The private observability middleware records only HTTP method, status code, and elapsed time. Database security-context and rollback failures emit fixed diagnostic categories without exception objects or connection/user details. These logs do not record paths, query strings, subjects, headers, bodies, exception messages, measurements, or lab values. Deployment-level proxy, APM, and database logging still require a separate privacy review.
 
-Postgres is controlled by the existing `Postgres` configuration section:
+## Migration and deployment prerequisites
 
-```json
-{
-  "Postgres": {
-    "Enabled": true,
-    "ConnectionString": "<development-only connection string>"
-  }
-}
-```
+`supabase/migrations/20260713000000_private_profile_foundation.sql` is the schema source of truth. It intentionally fails if the schema or boundary role already exists so an unexpected object cannot be silently adopted. The application does not create or alter database objects at startup. No cloud migration is part of this change.
 
-The migration `20260713000000_private_profile_foundation.sql` is the schema source of truth. The application does not create or alter tables at startup. When Postgres is disabled, the registered store returns an unavailable result and the private API returns `503`; it does not use a demo or in-memory production fallback.
+Before production exposure:
 
-The migration enables and forces RLS, adds ownership policies, foreign keys, checks, and indexes for profile/timestamp access. Append-only tables are granted select/insert access to the application roles, while profile, preference, and goal updates are separately granted. No cloud deployment is part of this change.
+- configure and test a real token-validating identity provider, including issuer, audience, signing keys, expiry, replay/session policy, and immutable subject mapping;
+- use a dedicated `NOINHERIT` runtime login and verify the startup access checks pass;
+- dry-run the migration against a disposable database, then obtain human approval before any linked project deployment;
+- run `scripts/validate-data/validate_private_profile_schema.sql` as a migration administrator on that disposable database;
+- run `scripts/validate-data/validate_private_profile_rls.sql`; it uses fictional rows inside a rolled-back transaction to test two-subject isolation and default-consent uniqueness;
+- test RLS with two real database subjects and test commit, rollback, cancellation, and pooled-connection reuse;
+- review TLS, secret rotation, backups, deletion/retention, audit access, incident response, rate limiting, and any cookie-authentication CSRF controls;
+- review proxy, APM, database, and support logs for private-data leakage.
 
-## Export and deletion boundary
+When Postgres is disabled, the private store returns `503`; there is no demo or in-memory production fallback.
 
-The schema makes a later profile export straightforward: select the profile, then its consents, measurements, labs, preferences, and goals by `profile_id` in a single controlled service operation. Child records use deliberate `on delete cascade` foreign keys so a future deletion workflow can delete the profile root after authorization and audit checks. Export and deletion endpoints, retention policies, legal holds, and recovery procedures are intentionally not implemented here.
+## Export, deletion, and compliance boundary
 
-## Intentionally not implemented
+The foreign-key structure supports a future authorized export and a root-profile deletion with cascading children. Export and deletion endpoints, retention schedules, legal holds, recovery procedures, audit-event retention, and idempotency keys for caller-submitted consent events are not implemented.
 
-This foundation does not provide diagnosis, medical advice, treatment prescriptions, recommendations, stack optimization, product catalog or commerce functions, insurance claims, data licensing, document upload/OCR, wearable or health-platform integrations, mobile screens, research sharing, commercial sharing, or aggregate dataset release.
-
-## Compliance limitations
-
-This implementation alone does not claim HIPAA, GDPR, or any other regulatory compliance. Remaining work includes identity-provider and session controls, operational access governance, encryption and key-management review, audit-log retention and tamper protection, backup/deletion semantics, retention and consent-policy workflows, incident response, data-subject rights, vendor agreements, regional processing controls, threat modeling, and an independent legal/security review.
-
-The public evidence schema remains educational and free of personal health information. Tests use only obviously fictional subjects and values.
-
-## Future use
-
-The normalized private profile can later be consumed by a personalization engine through application interfaces rather than HTTP objects or direct controller queries. That creates a stable boundary for evidence views, budget-aware comparisons, outcome tracking, clinician/researcher workflows, and consent-gated aggregate analytics without mixing those capabilities into the initial private data plane.
+This foundation does not claim HIPAA, GDPR, or other regulatory compliance. It does not provide diagnosis, medical advice, treatment, recommendations, commerce, insurance claims, research sharing, commercial sharing, document upload/OCR, wearable integration, or aggregate dataset release.
