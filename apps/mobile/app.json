@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "Longevity Intelligence",
+    "slug": "longevity-intelligence",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "scheme": "longevity",
+    "plugins": ["expo-router"],
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.longevityintelligence.app"
+    },
+    "android": {
+      "package": "com.longevityintelligence.app"
+    },
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

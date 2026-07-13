@@ -1,5 +1,6 @@
 {
   "name": "longevity-intelligence",
+  "private": true,
   "version": "1.0.0",
   "description": "An AI-ready longevity intelligence platform.",
   "main": "index.js",
@@ -7,7 +8,18 @@
     "doc": "docs"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "web:dev": "npm --workspace @longevity/web run dev",
+    "web:build": "npm --workspace @longevity/web run build",
+    "web:start": "npm --workspace @longevity/web run start",
+    "web:test": "npm --workspace @longevity/web run test",
+    "mobile:start": "npm --workspace @longevity/mobile run start",
+    "mobile:android": "npm --workspace @longevity/mobile run android",
+    "mobile:ios": "npm --workspace @longevity/mobile run ios",
+    "mobile:web": "npm --workspace @longevity/mobile run web",
+    "mobile:export": "npm --workspace @longevity/mobile exec -- expo export --platform all",
+    "shared:type-check": "npm --workspace @longevity/shared run type-check",
+    "frontend:type-check": "npm run shared:type-check && npm --workspace @longevity/web run type-check && npm --workspace @longevity/mobile run type-check",
+    "test": "dotnet test Longevity.sln",
     "supabase:version": "npx.cmd supabase --version",
     "supabase:link-status": "npx.cmd supabase migration list",
     "db:dry-run": "npx.cmd supabase db push --dry-run --include-seed",
@@ -22,11 +34,16 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "bugs": {
     "url": "https://github.com/Tom-Hoinacki/longevity-intelligence/issues"
   },
   "homepage": "https://github.com/Tom-Hoinacki/longevity-intelligence#readme",
   "devDependencies": {
-    "supabase": "^2.109.1"
+    "supabase": "^2.109.1",
+    "typescript": "^6.0.3"
   }
 }

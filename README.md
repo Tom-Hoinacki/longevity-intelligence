@@ -10,6 +10,39 @@ Asset → Claim → Source → Evidence → Score → Verdict
 
 Everything should be structured, source-backed, and expandable by both humans and AI agents.
 
+## Cross-platform Hello World
+
+The frontend foundation lives in an npm workspace alongside the existing .NET and Supabase code:
+
+- `apps/web` — Next.js web app and responsive desktop/PWA target.
+- `apps/mobile` — Expo React Native app for iOS and Android.
+- `packages/shared` — shared platform-neutral types and app constants.
+- `packages/supabase` — safe public Supabase client factory.
+
+From the repository root:
+
+```text
+npm install
+npm run web:dev
+npm run web:build
+npm run mobile:start
+npm run mobile:android
+npm run mobile:ios
+npm run mobile:web
+```
+
+See [docs/architecture/cross-platform-foundation.md](docs/architecture/cross-platform-foundation.md) for environment variables, platform requirements, and scope notes. The existing Vite application under `src/Longevity.Web` is preserved and is not replaced by this milestone.
+
+The Next.js app now includes the first Evidence Explorer slice. For local Demo-provider development, run the API and web app in separate terminals:
+
+```text
+dotnet run --project src/Longevity.Api --launch-profile http
+copy apps\web\.env.example apps\web\.env.local
+npm run web:dev
+```
+
+Then open `http://localhost:3000/assets`. The Demo provider is explicitly illustrative interface data; it is not medical evidence or a recommendation.
+
 ## Cloud development Supabase workflow
 
 This repository is the schema source of truth for the confirmed disposable Supabase development project. Docker and local Supabase virtualization are intentionally skipped; production must use a separate Supabase project.

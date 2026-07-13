@@ -11,3 +11,7 @@ TestResults/
 .supabase/
 supabase/.temp/
 *.log
+.next/
+.expo/
+apps/mobile/dist/
+*.tsbuildinfo
