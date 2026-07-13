@@ -26,3 +26,5 @@ Use the repository-local CLI:
 Never use `supabase start`, `supabase db reset`, or `supabase db reset --linked` in this workflow. Never put passwords, access tokens, API keys, service-role keys, or database connection strings in this repository. Dashboard schema edits must be represented by migrations before deployment.
 
 Cascade deletion is intentional: deleting an asset removes its claims, and deleting a claim or source removes dependent claim-evidence links. This keeps the educational evidence graph internally consistent; it must never be used for personal health data.
+
+- `docs/architecture/market-intelligence-foundation.md` documents the public market-intelligence boundary for providers, commercial offerings, historical price observations, availability observations, and read-only API routes.

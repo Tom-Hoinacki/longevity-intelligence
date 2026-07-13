@@ -23,11 +23,13 @@ if (builder.Configuration.GetSection("WorkflowOrchestrator").GetValue<bool>("Ena
 builder.Services.AddLongevityDiagnostics(builder.Configuration);
 builder.Services.AddHumanReviewApi(builder.Configuration);
 builder.Services.AddPublicEvidenceApi(builder.Configuration);
+builder.Services.AddMarketIntelligenceApi(builder.Configuration);
 
 var app = builder.Build();
 
 app.MapLongevityDiagnostics();
 app.MapHumanReviewApi();
 app.MapPublicEvidenceApi();
+app.MapMarketIntelligenceApi();
 
 app.Run();
