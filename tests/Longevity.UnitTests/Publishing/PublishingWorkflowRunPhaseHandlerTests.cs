@@ -7,6 +7,7 @@ namespace Longevity.UnitTests.Publishing;
 public sealed class PublishingWorkflowRunPhaseHandlerTests
 {
     private static readonly DateTimeOffset Now = new(2026, 7, 12, 12, 0, 0, TimeSpan.Zero);
+    private const string ScoringJson = """{"schemaVersion":"claim-candidate-v2","passed":true,"scoring":{"policyId":"evidence-scoring-v1","score":60.0,"publicScore":3.0,"verdict":"moderate","alignment":"supports","reasonCodes":["study_design.randomized_controlled_trial"]}}""";
 
     [Fact]
     public void Advertises_publishing_state() =>
@@ -111,6 +112,13 @@ public sealed class PublishingWorkflowRunPhaseHandlerTests
     }
 
     [Fact]
+    public async Task Claims_require_deterministic_scoring_artifact()
+    {
+        var run = Run(); var source = Source(run);
+        await RejectsBeforePublish(run, Batch(run, source: source, claims: [Claim(run, source, 1, validationJson: "{}")]));
+    }
+
+    [Fact]
     public async Task Every_claim_requires_authoritative_source_evidence()
     {
         var run = Run();
@@ -199,6 +207,7 @@ public sealed class PublishingWorkflowRunPhaseHandlerTests
             ("claim ordinal", FingerprintMutation(baseline, claims: ReplaceFirstClaim(baseline, new(claim.CandidateId, claim.WorkflowRunId, claim.SourceRecordId, 3, claim.ClaimText, claim.StructuredCandidateJson, claim.ValidationPassed, claim.HumanApproved)))),
             ("claim text", FingerprintMutation(baseline, claims: ReplaceFirstClaim(baseline, new(claim.CandidateId, claim.WorkflowRunId, claim.SourceRecordId, claim.Ordinal, "Changed claim", claim.StructuredCandidateJson, claim.ValidationPassed, claim.HumanApproved)))),
             ("claim structured JSON", FingerprintMutation(baseline, claims: ReplaceFirstClaim(baseline, new(claim.CandidateId, claim.WorkflowRunId, claim.SourceRecordId, claim.Ordinal, claim.ClaimText, "{\"changed\":true}", claim.ValidationPassed, claim.HumanApproved)))),
+            ("claim deterministic validation JSON", FingerprintMutation(baseline, claims: ReplaceFirstClaim(baseline, new(claim.CandidateId, claim.WorkflowRunId, claim.SourceRecordId, claim.Ordinal, claim.ClaimText, claim.StructuredCandidateJson, claim.ValidationPassed, claim.HumanApproved, ScoringJson.Replace("60.0", "40.0", StringComparison.Ordinal))))),
             ("claim validation flag", FingerprintMutation(baseline, claims: ReplaceFirstClaim(baseline, new(claim.CandidateId, claim.WorkflowRunId, claim.SourceRecordId, claim.Ordinal, claim.ClaimText, claim.StructuredCandidateJson, false, claim.HumanApproved)))),
             ("claim approval flag", FingerprintMutation(baseline, claims: ReplaceFirstClaim(baseline, new(claim.CandidateId, claim.WorkflowRunId, claim.SourceRecordId, claim.Ordinal, claim.ClaimText, claim.StructuredCandidateJson, claim.ValidationPassed, false)))),
             ("evidence candidate ID", FingerprintMutation(baseline, evidenceLinks: ReplaceFirstLink(baseline, new(new(new Guid("12121212-1212-1212-1212-121212121212")), link.SourceRecordId, link.EvidenceType)))),
@@ -292,7 +301,7 @@ public sealed class PublishingWorkflowRunPhaseHandlerTests
     private static PublishingWorkflowRunPhaseHandler Handler(FakePersistence persistence) => new(persistence, new FixedTimeProvider(Now));
     private static ClaimedWorkflowRun Run(WorkflowState? state = null) => new(new(Guid.NewGuid()), state ?? WorkflowState.Publishing, 7);
     private static PublicationSource Source(ClaimedWorkflowRun run, string title = "Source title", SourceRecordId? sourceRecordId = null, WorkflowRunId? workflowRunId = null, string identityKey = "source-key", string canonicalUrl = "https://example.test/source") => new(sourceRecordId ?? new(Guid.NewGuid()), workflowRunId ?? run.WorkflowRunId, identityKey, title, canonicalUrl);
-    private static PublicationClaim Claim(ClaimedWorkflowRun run, PublicationSource source, int ordinal, ClaimCandidateId? id = null, string text = "Evidence claim", string json = "{}", bool validated = true, bool approved = true) => new(id ?? new(Guid.NewGuid()), run.WorkflowRunId, source.SourceRecordId, ordinal, text, json, validated, approved);
+    private static PublicationClaim Claim(ClaimedWorkflowRun run, PublicationSource source, int ordinal, ClaimCandidateId? id = null, string text = "Evidence claim", string json = "{}", bool validated = true, bool approved = true, string validationJson = ScoringJson) => new(id ?? new(Guid.NewGuid()), run.WorkflowRunId, source.SourceRecordId, ordinal, text, json, validated, approved, validationJson);
     private static IEnumerable<PublicationEvidenceLink> Links(IEnumerable<PublicationClaim> claims, PublicationSource source) => claims.Select(c => new PublicationEvidenceLink(c.CandidateId, source.SourceRecordId, "authoritative-source"));
     private static ApprovedPublicationBatch FingerprintBatch()
     {
@@ -301,8 +310,8 @@ public sealed class PublishingWorkflowRunPhaseHandlerTests
         var source = new PublicationSource(sourceRecordId, workflowRunId, "source-key", "Source title", "https://example.test/source");
         var claims = new[]
         {
-            new PublicationClaim(new(new Guid("33333333-3333-3333-3333-333333333333")), workflowRunId, sourceRecordId, 1, "First claim", "{\"ordinal\":1}", true, true),
-            new PublicationClaim(new(new Guid("44444444-4444-4444-4444-444444444444")), workflowRunId, sourceRecordId, 2, "Second claim", "{\"ordinal\":2}", true, true)
+            new PublicationClaim(new(new Guid("33333333-3333-3333-3333-333333333333")), workflowRunId, sourceRecordId, 1, "First claim", "{\"ordinal\":1}", true, true, ScoringJson),
+            new PublicationClaim(new(new Guid("44444444-4444-4444-4444-444444444444")), workflowRunId, sourceRecordId, 2, "Second claim", "{\"ordinal\":2}", true, true, ScoringJson)
         };
         var links = new[]
         {

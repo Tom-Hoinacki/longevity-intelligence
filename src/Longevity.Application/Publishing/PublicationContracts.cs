@@ -9,28 +9,29 @@ namespace Longevity.Application.Publishing;
 
 public sealed record PublicationSource
 {
-    public PublicationSource(SourceRecordId sourceRecordId, WorkflowRunId workflowRunId, string identityKey, string title, string canonicalUrl)
+    public PublicationSource(SourceRecordId sourceRecordId, WorkflowRunId workflowRunId, string identityKey, string title, string? canonicalUrl, string sourceType = "unknown")
     {
         if (sourceRecordId.Value == Guid.Empty || workflowRunId.Value == Guid.Empty) throw new ArgumentException("Publication identities must be non-empty.");
         SourceRecordId = sourceRecordId; WorkflowRunId = workflowRunId;
-        IdentityKey = Required(identityKey, nameof(identityKey)); Title = Required(title, nameof(title)); CanonicalUrl = Required(canonicalUrl, nameof(canonicalUrl));
+        IdentityKey = Required(identityKey, nameof(identityKey)); Title = Required(title, nameof(title)); CanonicalUrl = string.IsNullOrWhiteSpace(canonicalUrl) ? null : canonicalUrl.Trim(); SourceType = Required(sourceType, nameof(sourceType));
     }
     public SourceRecordId SourceRecordId { get; }
     public WorkflowRunId WorkflowRunId { get; }
     public string IdentityKey { get; }
     public string Title { get; }
-    public string CanonicalUrl { get; }
+    public string? CanonicalUrl { get; }
+    public string SourceType { get; }
     private static string Required(string value, string name) => string.IsNullOrWhiteSpace(value) ? throw new ArgumentException("A required publication value is missing.", name) : value.Trim();
 }
 
 public sealed record PublicationClaim
 {
-    public PublicationClaim(ClaimCandidateId candidateId, WorkflowRunId workflowRunId, SourceRecordId sourceRecordId, int ordinal, string claimText, string structuredCandidateJson, bool validationPassed, bool humanApproved)
+    public PublicationClaim(ClaimCandidateId candidateId, WorkflowRunId workflowRunId, SourceRecordId sourceRecordId, int ordinal, string claimText, string structuredCandidateJson, bool validationPassed, bool humanApproved, string deterministicValidationJson = "{}")
     {
         if (candidateId.Value == Guid.Empty || workflowRunId.Value == Guid.Empty || sourceRecordId.Value == Guid.Empty) throw new ArgumentException("Publication identities must be non-empty.");
         if (ordinal < 1) throw new ArgumentOutOfRangeException(nameof(ordinal));
         CandidateId = candidateId; WorkflowRunId = workflowRunId; SourceRecordId = sourceRecordId; Ordinal = ordinal;
-        ClaimText = Required(claimText, nameof(claimText)); StructuredCandidateJson = ObjectJson(structuredCandidateJson); ValidationPassed = validationPassed; HumanApproved = humanApproved;
+        ClaimText = Required(claimText, nameof(claimText)); StructuredCandidateJson = ObjectJson(structuredCandidateJson); ValidationPassed = validationPassed; HumanApproved = humanApproved; DeterministicValidationJson = ObjectJson(deterministicValidationJson);
     }
     public ClaimCandidateId CandidateId { get; }
     public WorkflowRunId WorkflowRunId { get; }
@@ -38,6 +39,7 @@ public sealed record PublicationClaim
     public int Ordinal { get; }
     public string ClaimText { get; }
     public string StructuredCandidateJson { get; }
+    public string DeterministicValidationJson { get; }
     public bool ValidationPassed { get; }
     public bool HumanApproved { get; }
     private static string Required(string value, string name) => string.IsNullOrWhiteSpace(value) ? throw new ArgumentException("A required publication value is missing.", name) : value.Trim();
@@ -70,6 +72,7 @@ public enum AtomicPublicationResult { NewlyPublished, AlreadyPublishedIdenticall
 public interface IEvidencePublicationPersistence { Task<ApprovedPublicationBatch?> LoadApprovedPublicationBatchAsync(WorkflowRunId workflowRunId, CancellationToken cancellationToken); Task<AtomicPublicationResult> PublishAtomicallyAsync(AtomicPublicationCommand command, CancellationToken cancellationToken); }
 
 public sealed class PublicationInvariantException(string message) : InvalidOperationException(message);
+public sealed class PublicationConflictException(string message) : InvalidOperationException(message);
 
 public static class PublicationCommandFactory
 {
@@ -104,7 +107,8 @@ public static class PublicationCommandFactory
                 workflowRunId = snapshot.Source.WorkflowRunId.Value.ToString("N"),
                 snapshot.Source.IdentityKey,
                 snapshot.Source.Title,
-                snapshot.Source.CanonicalUrl
+                snapshot.Source.CanonicalUrl,
+                snapshot.Source.SourceType
             },
             claims = snapshot.Claims.Select(claim => new
             {
@@ -114,6 +118,7 @@ public static class PublicationCommandFactory
                 claim.Ordinal,
                 claim.ClaimText,
                 claim.StructuredCandidateJson,
+                claim.DeterministicValidationJson,
                 claim.ValidationPassed,
                 claim.HumanApproved
             }),

@@ -26,8 +26,8 @@ public sealed class OpenRouterClaimExtractionModel(HttpClient httpClient, IOptio
         {
             model = settings.Model,
             temperature = 0,
-            messages = new[] { new { role = "system", content = "Extract concise evidence claims. Return only the requested JSON object." }, new { role = "user", content = userPayload } },
-            response_format = new { type = "json_schema", json_schema = new { name = "claim_extraction", strict = true, schema = new { type = "object", properties = new { candidates = new { type = "array", items = new { type = "object", properties = new { claimText = new { type = "string" }, structuredCandidate = new { type = "object" } }, required = new[] { "claimText", "structuredCandidate" }, additionalProperties = false } } }, required = new[] { "candidates" }, additionalProperties = false } } }
+            messages = new[] { new { role = "system", content = "Extract source-grounded evidence claims only. Do not give medical advice. Preserve uncertainty and limitations. Return only the requested JSON object." }, new { role = "user", content = userPayload } },
+            response_format = new { type = "json_schema", json_schema = new { name = "claim_extraction", strict = true, schema = new { type = "object", properties = new { candidates = new { type = "array", maxItems = 50, items = new { type = "object", properties = new { claimText = new { type = "string", maxLength = StructuredClaimCandidateParser.MaximumClaimTextLength }, structuredCandidate = StructuredCandidateSchema() }, required = new[] { "claimText", "structuredCandidate" }, additionalProperties = false } } }, required = new[] { "candidates" }, additionalProperties = false } } }
         });
         using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         var requestId = response.Headers.TryGetValues("x-request-id", out var ids) ? ids.FirstOrDefault() : null;
@@ -59,9 +59,44 @@ public sealed class OpenRouterClaimExtractionModel(HttpClient httpClient, IOptio
         var claim = item.GetProperty("claimText").GetString();
         var structured = item.GetProperty("structuredCandidate");
         if (structured.ValueKind != JsonValueKind.Object || string.IsNullOrWhiteSpace(claim)) throw Invalid("A provider candidate was invalid.");
+        if (claim.Length > StructuredClaimCandidateParser.MaximumClaimTextLength ||
+            !StructuredClaimCandidateParser.TryParse(structured.GetRawText(), out _, out _))
+            throw Invalid("A provider candidate did not satisfy the controlled candidate schema.");
         return new ExtractedClaimCandidate(claim, structured.GetRawText());
     }
     private static int? UsageInt(JsonElement usage, string name) => usage.ValueKind == JsonValueKind.Object && usage.TryGetProperty(name, out var value) && value.TryGetInt32(out var result) && result >= 0 ? result : null;
     private static OpenRouterClaimExtractionException Invalid(string message) => new(message);
     private static StringContent JsonContent(object value) => new(JsonSerializer.Serialize(value, JsonOptions), Encoding.UTF8, "application/json");
+
+    private static object StructuredCandidateSchema() => new
+    {
+        type = "object",
+        properties = new Dictionary<string, object>
+        {
+            ["assetSlug"] = new { type = "string" },
+            ["assetName"] = new { type = "string" },
+            ["assetType"] = new { type = "string", @enum = new[] { "compound", "drug_category", "intervention", "behavior", "device", "diagnostic", "biomarker", "technology" } },
+            ["assetSummary"] = new { type = new[] { "string", "null" } },
+            ["claimType"] = new { type = new[] { "string", "null" } },
+            ["targetSystem"] = new { type = new[] { "string", "null" } },
+            ["population"] = new { type = new[] { "string", "null" } },
+            ["outcomeMeasured"] = new { type = new[] { "string", "null" } },
+            ["evidenceLevel"] = new { type = "string", @enum = new[] { "mechanistic", "animal", "case_report", "cross_sectional", "observational", "randomized_controlled_trial", "systematic_review", "meta_analysis" } },
+            ["evidenceDirection"] = new { type = "string", @enum = new[] { "supports", "contradicts", "neutral" } },
+            ["effectSummary"] = new { type = new[] { "string", "null" } },
+            ["limitations"] = new { type = "string" },
+            ["supportingExcerpt"] = new { type = "string", maxLength = StructuredClaimCandidateParser.MaximumExcerptLength },
+            ["sampleSize"] = new { type = "integer", minimum = 0, maximum = 10_000_000 },
+            ["replicationCount"] = new { type = "integer", minimum = 0, maximum = 10_000 },
+            ["directness"] = new { type = "string", @enum = new[] { "indirect", "partially_direct", "direct" } },
+            ["riskOfBias"] = new { type = "string", @enum = new[] { "critical", "high", "moderate", "low" } },
+            ["consistency"] = new { type = "string", @enum = new[] { "strongly_contradictory", "mixed", "unknown", "consistent", "highly_consistent" } },
+            ["publicationStatus"] = new { type = "string", @enum = new[] { "unpublished", "preprint", "peer_reviewed" } },
+            ["isRetracted"] = new { type = "boolean" },
+            ["hasSeriousMethodologicalLimitations"] = new { type = "boolean" },
+            ["conflictOfInterest"] = new { type = new[] { "string", "null" }, @enum = new object?[] { "none", "low", "moderate", "high", null } }
+        },
+        required = new[] { "assetSlug", "assetName", "assetType", "assetSummary", "claimType", "targetSystem", "population", "outcomeMeasured", "evidenceLevel", "evidenceDirection", "effectSummary", "limitations", "supportingExcerpt", "sampleSize", "replicationCount", "directness", "riskOfBias", "consistency", "publicationStatus", "isRetracted", "hasSeriousMethodologicalLimitations", "conflictOfInterest" },
+        additionalProperties = false
+    };
 }

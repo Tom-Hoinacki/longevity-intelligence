@@ -6,9 +6,42 @@ Goal:
 Build the TradingView of longevity.
 
 Core idea:
-Asset → Claim → Source → Evidence → Score → Verdict
+Asset â†’ Claim â†’ Source â†’ Evidence â†’ Score â†’ Verdict
 
 Everything should be structured, source-backed, and expandable by both humans and AI agents.
+
+## Cross-platform Hello World
+
+The frontend foundation lives in an npm workspace alongside the existing .NET and Supabase code:
+
+- `apps/web` â€” Next.js web app and responsive desktop/PWA target.
+- `apps/mobile` â€” Expo React Native app for iOS and Android.
+- `packages/shared` â€” shared platform-neutral types and app constants.
+- `packages/supabase` â€” safe public Supabase client factory.
+
+From the repository root:
+
+```text
+npm install
+npm run web:dev
+npm run web:build
+npm run mobile:start
+npm run mobile:android
+npm run mobile:ios
+npm run mobile:web
+```
+
+See [docs/architecture/cross-platform-foundation.md](docs/architecture/cross-platform-foundation.md) for environment variables, platform requirements, and scope notes. The existing Vite application under `src/Longevity.Web` is preserved and is not replaced by this milestone.
+
+The Next.js app now includes the first Evidence Explorer slice. For local Demo-provider development, run the API and web app in separate terminals:
+
+```text
+dotnet run --project src/Longevity.Api --launch-profile http
+copy apps\web\.env.example apps\web\.env.local
+npm run web:dev
+```
+
+Then open `http://localhost:3000/assets`. The Demo provider is explicitly illustrative interface data; it is not medical evidence or a recommendation.
 
 ## Cloud development Supabase workflow
 
@@ -28,3 +61,4 @@ Never use `supabase start`, `supabase db reset`, or `supabase db reset --linked`
 Cascade deletion is intentional: deleting an asset removes its claims, and deleting a claim or source removes dependent claim-evidence links. This keeps the educational evidence graph internally consistent; it must never be used for personal health data.
 
 - `docs/architecture/market-intelligence-foundation.md` documents the public market-intelligence boundary for providers, commercial offerings, historical price observations, availability observations, and read-only API routes.
+

@@ -1,6 +1,11 @@
 using Longevity.Application.Orchestration;
 using Longevity.Application.Contracts;
 using Longevity.Application.HumanReview;
+using Longevity.Application.Publishing;
+using Longevity.Application.SourceNormalization;
+using Longevity.Application.Validation;
+using Longevity.Application.WorkflowIntake;
+using Longevity.Application.EvidenceScoring;
 using Longevity.Api.HumanReview;
 using Longevity.Infrastructure.Persistence;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -11,8 +16,14 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddLongevityApplication(this IServiceCollection services)
     {
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddSingleton<EvidenceScoringEngine>();
+        services.AddSingleton<ISourceNormalizer, ScientificSourceNormalizer>();
+        services.AddSingleton<IClaimCandidateValidator, DeterministicClaimCandidateValidator>();
+        services.AddSingleton<IWorkflowIntakeService, WorkflowIntakeService>();
         services.AddSingleton<IWorkflowRunPhaseHandler, ExtractingWorkflowRunPhaseHandler>();
         services.AddSingleton<IWorkflowRunPhaseHandler, ValidatingWorkflowRunPhaseHandler>();
+        services.AddSingleton<IWorkflowRunPhaseHandler, PublishingWorkflowRunPhaseHandler>();
         return services;
     }
 
@@ -65,16 +76,24 @@ public static class ServiceCollectionExtensions
             {
                 try
                 {
-                    options.EnsureValid();
+                    options.EnsureValid(PostgresEnabled(configuration));
                     return true;
                 }
-                catch (ArgumentOutOfRangeException)
+                catch (ArgumentException)
                 {
                     return false;
                 }
-            }, "PollingIntervalSeconds must be greater than zero.")
+            }, "The workflow orchestrator requires positive polling/retry intervals and PostgreSQL persistence when enabled.")
             .ValidateOnStart();
+
+        services.AddSingleton<IWorkflowRunProcessor>(sp => new WorkflowRunProcessor(
+            sp.GetRequiredService<IWorkflowRunRepository>(),
+            sp.GetServices<IWorkflowRunPhaseHandler>(),
+            sp.GetRequiredService<TimeProvider>(),
+            TimeSpan.FromSeconds(sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<WorkflowOrchestratorOptions>>().Value.RetryDelaySeconds)));
 
         return services;
     }
+
+    private static bool PostgresEnabled(IConfiguration configuration) => configuration.GetSection(PostgresOptions.SectionName).GetValue<bool>(nameof(PostgresOptions.Enabled));
 }
