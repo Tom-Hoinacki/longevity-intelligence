@@ -4,6 +4,7 @@ using Longevity.Api.HumanReview;
 using Longevity.Api.Workflow;
 using Longevity.Api.PublicEvidence;
 using Longevity.Infrastructure.ModelProviders.OpenRouter;
+using Longevity.Api.PrivateProfile;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -31,12 +32,18 @@ builder.Services.AddLongevityDiagnostics(builder.Configuration);
 builder.Services.AddHumanReviewApi(builder.Configuration);
 builder.Services.AddPublicEvidenceApi(builder.Configuration);
 builder.Services.AddWorkflowIntakeApi(builder.Configuration);
+builder.Services.AddPrivateProfileApi();
 
 var app = builder.Build();
+
+app.UsePrivateProfileSafeObservability();
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapLongevityDiagnostics();
 app.MapHumanReviewApi();
 app.MapPublicEvidenceApi();
 app.MapWorkflowIntakeApi();
+app.MapPrivateProfileApi();
 
 app.Run();

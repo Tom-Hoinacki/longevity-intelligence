@@ -5,6 +5,8 @@ using Npgsql;
 using Longevity.Application.Contracts;
 using Longevity.Application.HumanReview;
 using Longevity.Application.Publishing;
+using Longevity.Application.PrivateProfile;
+using Longevity.Infrastructure.PrivateProfile;
 
 namespace Longevity.Infrastructure.Persistence;
 
@@ -48,6 +50,12 @@ public static class PostgresServiceCollectionExtensions
             services.AddSingleton<IHumanReviewPersistence, PostgresHumanReviewPersistence>();
             services.AddSingleton<IWorkflowIntakePersistence, PostgresWorkflowIntakePersistence>();
             services.AddSingleton<IEvidencePublicationPersistence, PostgresEvidencePublicationPersistence>();
+            services.AddSingleton<IPrivateProfileStore, PostgresPrivateProfileStore>();
+        }
+        else
+        {
+            // Never silently switch private-profile requests to an in-memory or demo store.
+            services.AddSingleton<IPrivateProfileStore, DisabledPrivateProfileStore>();
         }
 
         return services;
