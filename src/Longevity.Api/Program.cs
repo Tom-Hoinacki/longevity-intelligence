@@ -31,6 +31,7 @@ if (orchestratorEnabled)
 builder.Services.AddLongevityDiagnostics(builder.Configuration);
 builder.Services.AddHumanReviewApi(builder.Configuration);
 builder.Services.AddPublicEvidenceApi(builder.Configuration);
+builder.Services.AddMarketIntelligenceApi(builder.Configuration);
 builder.Services.AddWorkflowIntakeApi(builder.Configuration);
 builder.Services.AddPrivateProfileApi();
 
@@ -43,7 +44,9 @@ app.UseAuthorization();
 app.MapLongevityDiagnostics();
 app.MapHumanReviewApi();
 app.MapPublicEvidenceApi();
+app.MapMarketIntelligenceApi();
 app.MapWorkflowIntakeApi();
 app.MapPrivateProfileApi();
 
 app.Run();
+
