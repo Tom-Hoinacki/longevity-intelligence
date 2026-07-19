@@ -11,6 +11,30 @@ public sealed record SubmittedAuthoritativeSource(
     string? Pmid = null,
     string? ClinicalTrialsGovIdentifier = null);
 
+public static class ScientificSourcePolicy
+{
+    public const int MaximumTitleLength = 500;
+    public const int MaximumContentLength = 1_000_000;
+    public const int MaximumUrlLength = 2_048;
+
+    public static IReadOnlySet<string> SupportedSourceTypes { get; } = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "journal_article",
+        "preprint",
+        "clinical_trial",
+        "systematic_review",
+        "meta_analysis"
+    };
+
+    public static string RequireSourceType(string value)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().ToLowerInvariant();
+        if (!SupportedSourceTypes.Contains(normalized))
+            throw new ArgumentException("The source type is unsupported.", nameof(value));
+        return normalized;
+    }
+}
+
 public sealed record NormalizedScientificSource(
     SourceRecordId SourceRecordId,
     WorkflowRunId WorkflowRunId,

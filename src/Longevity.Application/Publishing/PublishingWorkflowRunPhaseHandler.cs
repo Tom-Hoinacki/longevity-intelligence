@@ -1,5 +1,6 @@
 using Longevity.Application.Contracts;
 using Longevity.Domain.Workflow;
+using Longevity.Application.Validation;
 
 namespace Longevity.Application.Publishing;
 
@@ -34,6 +35,7 @@ public sealed class PublishingWorkflowRunPhaseHandler : IWorkflowRunPhaseHandler
         if (batch.WorkflowRunId != run.WorkflowRunId || batch.WorkflowRunVersion != run.Version || batch.WorkflowState != WorkflowState.Publishing) throw new PublicationInvariantException("Publication batch identity or state is invalid.");
         if (batch.Source.WorkflowRunId != run.WorkflowRunId || batch.ApprovedAt == default || batch.ApprovedAt > now || batch.Claims.Count == 0) throw new PublicationInvariantException("Publication batch approval or source is invalid.");
         if (batch.Claims.Any(c => c is null || c.WorkflowRunId != run.WorkflowRunId || c.SourceRecordId != batch.Source.SourceRecordId || !c.ValidationPassed || !c.HumanApproved)) throw new PublicationInvariantException("Publication claim invariants are not satisfied.");
+        if (batch.Claims.Any(c => !DeterministicValidationArtifactParser.TryReadScoring(c.DeterministicValidationJson, out _))) throw new PublicationInvariantException("Publication claims require deterministic scoring artifacts.");
         if (batch.Claims.Select(c => c.CandidateId).Distinct().Count() != batch.Claims.Count || batch.Claims.Select(c => c.Ordinal).Distinct().Count() != batch.Claims.Count || !batch.Claims.Select(c => c.Ordinal).OrderBy(x => x).SequenceEqual(Enumerable.Range(1, batch.Claims.Count))) throw new PublicationInvariantException("Publication claim ordering is invalid.");
         if (batch.EvidenceLinks.Any(link => link is null)) throw new PublicationInvariantException("Publication evidence links must be non-null.");
         var candidateIds = batch.Claims.Select(claim => claim.CandidateId).ToHashSet();

@@ -5,6 +5,7 @@ using Longevity.Application.Publishing;
 using Longevity.Application.SourceNormalization;
 using Longevity.Application.Validation;
 using Longevity.Application.WorkflowIntake;
+using Longevity.Application.EvidenceScoring;
 using Longevity.Api.HumanReview;
 using Longevity.Infrastructure.Persistence;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -16,6 +17,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddLongevityApplication(this IServiceCollection services)
     {
         services.TryAddSingleton(TimeProvider.System);
+        services.AddSingleton<EvidenceScoringEngine>();
         services.AddSingleton<ISourceNormalizer, ScientificSourceNormalizer>();
         services.AddSingleton<IClaimCandidateValidator, DeterministicClaimCandidateValidator>();
         services.AddSingleton<IWorkflowIntakeService, WorkflowIntakeService>();
@@ -74,10 +76,10 @@ public static class ServiceCollectionExtensions
             {
                 try
                 {
-                    options.EnsureValid(builderPostgresEnabled(configuration));
+                    options.EnsureValid(PostgresEnabled(configuration));
                     return true;
                 }
-                catch (ArgumentOutOfRangeException)
+                catch (ArgumentException)
                 {
                     return false;
                 }
@@ -93,5 +95,5 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    private static bool builderPostgresEnabled(IConfiguration configuration) => configuration.GetSection(PostgresOptions.SectionName).GetValue<bool>(nameof(PostgresOptions.Enabled));
+    private static bool PostgresEnabled(IConfiguration configuration) => configuration.GetSection(PostgresOptions.SectionName).GetValue<bool>(nameof(PostgresOptions.Enabled));
 }

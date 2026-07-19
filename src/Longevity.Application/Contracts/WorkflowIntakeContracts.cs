@@ -17,3 +17,4 @@ public interface IWorkflowIntakeService
 }
 
 public sealed class WorkflowIntakeConflictException(string message) : InvalidOperationException(message);
+public sealed class WorkflowIntakeUnavailableException(string message, Exception? innerException = null) : Exception(message, innerException);

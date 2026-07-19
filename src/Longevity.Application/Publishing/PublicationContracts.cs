@@ -26,12 +26,12 @@ public sealed record PublicationSource
 
 public sealed record PublicationClaim
 {
-    public PublicationClaim(ClaimCandidateId candidateId, WorkflowRunId workflowRunId, SourceRecordId sourceRecordId, int ordinal, string claimText, string structuredCandidateJson, bool validationPassed, bool humanApproved)
+    public PublicationClaim(ClaimCandidateId candidateId, WorkflowRunId workflowRunId, SourceRecordId sourceRecordId, int ordinal, string claimText, string structuredCandidateJson, bool validationPassed, bool humanApproved, string deterministicValidationJson = "{}")
     {
         if (candidateId.Value == Guid.Empty || workflowRunId.Value == Guid.Empty || sourceRecordId.Value == Guid.Empty) throw new ArgumentException("Publication identities must be non-empty.");
         if (ordinal < 1) throw new ArgumentOutOfRangeException(nameof(ordinal));
         CandidateId = candidateId; WorkflowRunId = workflowRunId; SourceRecordId = sourceRecordId; Ordinal = ordinal;
-        ClaimText = Required(claimText, nameof(claimText)); StructuredCandidateJson = ObjectJson(structuredCandidateJson); ValidationPassed = validationPassed; HumanApproved = humanApproved;
+        ClaimText = Required(claimText, nameof(claimText)); StructuredCandidateJson = ObjectJson(structuredCandidateJson); ValidationPassed = validationPassed; HumanApproved = humanApproved; DeterministicValidationJson = ObjectJson(deterministicValidationJson);
     }
     public ClaimCandidateId CandidateId { get; }
     public WorkflowRunId WorkflowRunId { get; }
@@ -39,6 +39,7 @@ public sealed record PublicationClaim
     public int Ordinal { get; }
     public string ClaimText { get; }
     public string StructuredCandidateJson { get; }
+    public string DeterministicValidationJson { get; }
     public bool ValidationPassed { get; }
     public bool HumanApproved { get; }
     private static string Required(string value, string name) => string.IsNullOrWhiteSpace(value) ? throw new ArgumentException("A required publication value is missing.", name) : value.Trim();
@@ -117,6 +118,7 @@ public static class PublicationCommandFactory
                 claim.Ordinal,
                 claim.ClaimText,
                 claim.StructuredCandidateJson,
+                claim.DeterministicValidationJson,
                 claim.ValidationPassed,
                 claim.HumanApproved
             }),

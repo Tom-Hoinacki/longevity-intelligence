@@ -1,6 +1,5 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
+using Longevity.Api.Security;
 using Longevity.Application.HumanReview;
 using Longevity.Domain.Workflow;
 using Microsoft.Extensions.Options;
@@ -156,16 +155,7 @@ public static class HumanReviewEndpoints
     }
 
     private static bool IsAuthorized(HttpRequest request, HumanReviewApiOptions options)
-    {
-        if (!options.Enabled || string.IsNullOrEmpty(options.AccessSecret)) return false;
-        var authorization = request.Headers.Authorization.ToString();
-        const string prefix = "Bearer ";
-        if (!authorization.StartsWith(prefix, StringComparison.Ordinal) || authorization.Length == prefix.Length) return false;
-
-        var suppliedHash = SHA256.HashData(Encoding.UTF8.GetBytes(authorization[prefix.Length..]));
-        var expectedHash = SHA256.HashData(Encoding.UTF8.GetBytes(options.AccessSecret));
-        return CryptographicOperations.FixedTimeEquals(suppliedHash, expectedHash);
-    }
+        => options.Enabled && TrustedBearerAuthorization.IsAuthorized(request, options.AccessSecret);
 
     private static bool TryParseIdentity(string? value, out Guid identity) =>
         Guid.TryParse(value, out identity) && identity != Guid.Empty;

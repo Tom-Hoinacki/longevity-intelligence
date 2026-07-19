@@ -41,7 +41,7 @@ public sealed class PostgresWorkflowIntakePersistence(NpgsqlDataSource dataSourc
             if (inserted)
             {
                 await using var source = new NpgsqlCommand(WorkflowIntakePersistencePolicy.InsertSourceSql, connection, transaction);
-                AddSourceParameters(source, runId, request.Source, normalized);
+                AddSourceParameters(source, runId, normalized);
                 await source.ExecuteNonQueryAsync(cancellationToken);
             }
             else
@@ -58,6 +58,16 @@ public sealed class PostgresWorkflowIntakePersistence(NpgsqlDataSource dataSourc
             await transaction.CommitAsync(cancellationToken);
             return new WorkflowIntakeResult(new WorkflowRunId(runId), WorkflowState.FromDatabaseValue(state), version, !inserted);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            throw;
+        }
+        catch (NpgsqlException exception)
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            throw new WorkflowIntakeUnavailableException("Workflow intake persistence is unavailable.", exception);
+        }
         catch
         {
             await transaction.RollbackAsync(CancellationToken.None);
@@ -65,7 +75,7 @@ public sealed class PostgresWorkflowIntakePersistence(NpgsqlDataSource dataSourc
         }
     }
 
-    private static void AddSourceParameters(NpgsqlCommand command, Guid runId, SubmittedAuthoritativeSource submitted, ScientificSourceNormalizationResult normalized)
+    private static void AddSourceParameters(NpgsqlCommand command, Guid runId, ScientificSourceNormalizationResult normalized)
     {
         var identifiers = normalized.SourceIdentityKey.Split(':', 2);
         command.Parameters.AddWithValue("p_workflow_run_id", runId);
