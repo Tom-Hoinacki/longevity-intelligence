@@ -10,11 +10,16 @@ public static class ValidationPersistencePolicy
             ORDER BY candidate_version DESC
             LIMIT 1
         )
-        SELECT id, workflow_run_id, source_record_id, candidate_version,
-               candidate_ordinal, claim_text, structured_candidate
-        FROM workflow.claim_candidates
-        WHERE workflow_run_id = $1
-          AND candidate_version = (SELECT candidate_version FROM latest_version)
+        SELECT candidate.id, candidate.workflow_run_id, candidate.source_record_id,
+               candidate.candidate_version, candidate.candidate_ordinal,
+               candidate.claim_text, candidate.structured_candidate,
+               source.normalized_text
+        FROM workflow.claim_candidates AS candidate
+        JOIN workflow.source_records AS source
+          ON source.id = candidate.source_record_id
+         AND source.workflow_run_id = candidate.workflow_run_id
+        WHERE candidate.workflow_run_id = $1
+          AND candidate.candidate_version = (SELECT candidate_version FROM latest_version)
         ORDER BY candidate_ordinal;
         """;
 

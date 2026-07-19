@@ -8,6 +8,7 @@ using Npgsql;
 using Longevity.Api.DependencyInjection;
 using Longevity.Application.Orchestration;
 using Longevity.Application.HumanReview;
+using Longevity.Application.Publishing;
 
 namespace Longevity.Infrastructure.Tests;
 
@@ -398,16 +399,17 @@ public sealed class PostgresPersistenceTests
     }
 
     [Fact]
-    public void Application_registration_adds_exactly_extracting_and_validating_handlers_only()
+    public void Application_registration_adds_all_processing_phase_handlers()
     {
         var services = new ServiceCollection();
 
         services.AddLongevityApplication();
 
         var handlers = services.Where(descriptor => descriptor.ServiceType == typeof(IWorkflowRunPhaseHandler)).ToArray();
-        Assert.Equal(2, handlers.Length);
+        Assert.Equal(3, handlers.Length);
         Assert.Contains(handlers, descriptor => descriptor.ImplementationType == typeof(ExtractingWorkflowRunPhaseHandler));
         Assert.Contains(handlers, descriptor => descriptor.ImplementationType == typeof(ValidatingWorkflowRunPhaseHandler));
+        Assert.Contains(handlers, descriptor => descriptor.ImplementationType == typeof(PublishingWorkflowRunPhaseHandler));
         Assert.DoesNotContain(services, descriptor => descriptor.ServiceType == typeof(IWorkflowRunProcessor));
     }
 
@@ -420,13 +422,15 @@ public sealed class PostgresPersistenceTests
         services.AddSingleton<IClaimExtractionPersistence, TestExtractionPersistence>();
         services.AddSingleton<IClaimCandidateValidator, TestValidator>();
         services.AddSingleton<IClaimCandidateValidationPersistence, TestValidationPersistence>();
+        services.AddSingleton<IEvidencePublicationPersistence, TestPublicationPersistence>();
 
         using var provider = services.BuildServiceProvider();
         var handlers = provider.GetServices<IWorkflowRunPhaseHandler>().ToArray();
 
-        Assert.Equal(2, handlers.Length);
+        Assert.Equal(3, handlers.Length);
         Assert.Contains(handlers, handler => handler is ExtractingWorkflowRunPhaseHandler);
         Assert.Contains(handlers, handler => handler is ValidatingWorkflowRunPhaseHandler);
+        Assert.Contains(handlers, handler => handler is PublishingWorkflowRunPhaseHandler);
     }
 
     private static IConfiguration BuildConfiguration(params (string Key, string Value)[] values)
@@ -459,5 +463,11 @@ public sealed class PostgresPersistenceTests
     {
         public Task<IReadOnlyList<ClaimCandidateForValidation>> LoadLatestCandidateBatchAsync(WorkflowRunId workflowRunId, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<ClaimCandidateForValidation>>([]);
         public Task PersistValidationResultsAsync(WorkflowRunId workflowRunId, IReadOnlyList<ClaimCandidateValidationUpdate> updates, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class TestPublicationPersistence : IEvidencePublicationPersistence
+    {
+        public Task<ApprovedPublicationBatch?> LoadApprovedPublicationBatchAsync(WorkflowRunId workflowRunId, CancellationToken cancellationToken) => Task.FromResult<ApprovedPublicationBatch?>(null);
+        public Task<AtomicPublicationResult> PublishAtomicallyAsync(AtomicPublicationCommand command, CancellationToken cancellationToken) => Task.FromResult(AtomicPublicationResult.NewlyPublished);
     }
 }

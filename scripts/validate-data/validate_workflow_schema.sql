@@ -3,7 +3,7 @@
 
 with
 workflow_tables(table_name) as (
-    values ('runs'), ('source_records'), ('claim_candidates'), ('approvals')
+    values ('runs'), ('source_records'), ('claim_candidates'), ('approvals'), ('publications')
 ),
 workflow_table_oids as (
     select table_name, to_regclass('workflow.' || table_name) as table_oid
@@ -33,7 +33,7 @@ expected_states(state) as (
 expected_public_columns(table_name, column_name) as (
     values
         ('longevity_assets', 'id'), ('longevity_assets', 'slug'), ('longevity_assets', 'name'),
-        ('claims', 'id'), ('claims', 'asset_id'), ('claims', 'claim_text'),
+        ('claims', 'id'), ('claims', 'asset_id'), ('claims', 'claim_text'), ('claims', 'evidence_scoring_policy_id'),
         ('sources', 'id'), ('sources', 'source_type'), ('sources', 'title'),
         ('claim_evidence', 'id'), ('claim_evidence', 'claim_id'), ('claim_evidence', 'source_id')
 ),
@@ -46,8 +46,8 @@ validation_checks as (
     union all
 
     select
-        'four_expected_workflow_tables',
-        count(*) = 4 and count(*) filter (where table_oid is not null) = 4,
+        'five_expected_workflow_tables',
+        count(*) = 5 and count(*) filter (where table_oid is not null) = 5,
         count(*) filter (where table_oid is not null)::text
     from workflow_table_oids
 
@@ -55,7 +55,7 @@ validation_checks as (
 
     select
         'exact_primary_keys',
-        count(*) = 4
+        count(*) = 5
         and not exists (
             select 1
             from workflow_table_oids t
@@ -72,7 +72,7 @@ validation_checks as (
 
     select
         'exact_restrict_foreign_keys',
-        count(*) = 5
+        count(*) = 7
         and bool_and(definition like '%ON DELETE RESTRICT%')
         and exists (
             select 1 from workflow_constraint_defs
@@ -83,6 +83,16 @@ validation_checks as (
             select 1 from workflow_constraint_defs
             where conname = 'workflow_approvals_candidate_version_run_fk'
               and definition like 'FOREIGN KEY (candidate_id, candidate_version, workflow_run_id) REFERENCES workflow.claim_candidates(id, candidate_version, workflow_run_id)%'
+        )
+        and exists (
+            select 1 from workflow_constraint_defs
+            where conrelid = to_regclass('workflow.publications')
+              and definition like 'FOREIGN KEY (workflow_run_id) REFERENCES workflow.runs(id) ON DELETE RESTRICT%'
+        )
+        and exists (
+            select 1 from workflow_constraint_defs
+            where conrelid = to_regclass('workflow.publications')
+              and definition like 'FOREIGN KEY (public_source_id) REFERENCES%sources(id) ON DELETE RESTRICT%'
         ),
         count(*)::text
     from workflow_constraint_defs
@@ -92,7 +102,7 @@ validation_checks as (
 
     select
         'rls_enabled_on_every_workflow_table',
-        count(*) = 4 and coalesce(bool_and(c.relrowsecurity), false),
+        count(*) = 5 and coalesce(bool_and(c.relrowsecurity), false),
         count(*)::text
     from pg_class c
     where c.oid in (select table_oid from workflow_table_oids)
@@ -215,6 +225,17 @@ validation_checks as (
         and not coalesce(has_table_privilege('service_role', to_regclass('workflow.approvals'), 'UPDATE'), false)
         and not coalesce(has_table_privilege('service_role', to_regclass('workflow.approvals'), 'DELETE'), false)
         and not coalesce(has_table_privilege('service_role', to_regclass('workflow.approvals'), 'TRUNCATE'), false),
+        'select, insert only'
+
+    union all
+
+    select
+        'service_role_append_only_publication_privileges',
+        coalesce(has_table_privilege('service_role', to_regclass('workflow.publications'), 'SELECT'), false)
+        and coalesce(has_table_privilege('service_role', to_regclass('workflow.publications'), 'INSERT'), false)
+        and not coalesce(has_table_privilege('service_role', to_regclass('workflow.publications'), 'UPDATE'), false)
+        and not coalesce(has_table_privilege('service_role', to_regclass('workflow.publications'), 'DELETE'), false)
+        and not coalesce(has_table_privilege('service_role', to_regclass('workflow.publications'), 'TRUNCATE'), false),
         'select, insert only'
 
     union all
@@ -462,6 +483,102 @@ validation_checks as (
               and pg_get_indexdef(i.indexrelid) like '%(workflow_run_id)%'
         ),
         'unique workflow_run_id'
+
+    union all
+
+    select
+        'publication_receipt_columns',
+        count(*) = 8
+        and bool_and(
+            case column_name
+                when 'id' then data_type = 'uuid' and is_nullable = 'NO'
+                when 'idempotency_key' then data_type = 'text' and is_nullable = 'NO'
+                when 'content_fingerprint' then data_type = 'text' and is_nullable = 'NO'
+                when 'workflow_run_id' then data_type = 'uuid' and is_nullable = 'NO'
+                when 'workflow_run_version' then data_type = 'integer' and is_nullable = 'NO'
+                when 'public_source_id' then data_type = 'uuid' and is_nullable = 'NO'
+                when 'public_claim_ids' then data_type = 'ARRAY' and udt_name = '_uuid' and is_nullable = 'NO'
+                when 'created_at' then data_type = 'timestamp with time zone' and is_nullable = 'NO'
+                else false
+            end
+        ),
+        string_agg(column_name || ':' || data_type || ':nullable=' || is_nullable, ', ' order by column_name)
+    from information_schema.columns
+    where table_schema = 'workflow'
+      and table_name = 'publications'
+
+    union all
+
+    select
+        'publication_receipt_constraints',
+        exists (
+            select 1 from workflow_constraint_defs
+            where conname = 'workflow_publications_run_version_key'
+              and definition = 'UNIQUE (workflow_run_id, workflow_run_version)'
+        )
+        and exists (
+            select 1 from workflow_constraint_defs
+            where conname = 'workflow_publications_idempotency_key_key'
+              and definition = 'UNIQUE (idempotency_key)'
+        )
+        and exists (
+            select 1 from workflow_constraint_defs
+            where conname = 'workflow_publications_idempotency_key_check'
+              and definition like '%btrim(idempotency_key)%'
+        )
+        and exists (
+            select 1 from workflow_constraint_defs
+            where conname = 'workflow_publications_fingerprint_check'
+              and definition like '%64%'
+        )
+        and exists (
+            select 1 from workflow_constraint_defs
+            where conname = 'workflow_publications_claim_ids_check'
+              and definition like '%cardinality(public_claim_ids)%'
+        ),
+        'unique idempotency and run/version; normalized key; fingerprint and nonempty claim ids'
+
+    union all
+
+    select
+        'publication_receipt_indexes',
+        exists (
+            select 1 from pg_index
+            where indexrelid = to_regclass('workflow.workflow_publications_run_version_key')
+              and indisunique
+        ) and exists (
+            select 1 from pg_index where indexrelid = to_regclass('workflow.workflow_publications_source_idx')
+        ),
+        'run/version unique index and public_source_id index'
+
+    union all
+
+    select
+        'public_claim_scoring_policy_provenance',
+        exists (
+            select 1 from information_schema.columns
+            where table_schema = 'public'
+              and table_name = 'claims'
+              and column_name = 'evidence_scoring_policy_id'
+              and data_type = 'text'
+              and is_nullable = 'YES'
+        )
+        and exists (
+            select 1 from pg_constraint
+            where conname = 'claims_evidence_scoring_policy_check'
+              and conrelid = to_regclass('public.claims')
+              and pg_get_constraintdef(oid) like '%btrim(evidence_scoring_policy_id)%'
+        ),
+        'nullable for legacy claims; normalized nonempty value when present'
+
+    union all
+
+    select
+        'public_graph_foreign_key_indexes',
+        to_regclass('public.claims_asset_idx') is not null
+        and to_regclass('public.claim_evidence_claim_idx') is not null
+        and to_regclass('public.claim_evidence_source_idx') is not null,
+        'claims.asset_id and claim_evidence claim/source indexes'
 
     union all
 

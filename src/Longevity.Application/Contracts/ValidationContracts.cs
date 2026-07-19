@@ -12,7 +12,8 @@ public sealed record ClaimCandidateForValidation
         int candidateVersion,
         int candidateOrdinal,
         string claimText,
-        string structuredCandidateJson)
+        string structuredCandidateJson,
+        string? normalizedSourceText = null)
     {
         if (candidateVersion < 1) throw new ArgumentOutOfRangeException(nameof(candidateVersion));
         if (candidateOrdinal < 1) throw new ArgumentOutOfRangeException(nameof(candidateOrdinal));
@@ -26,6 +27,7 @@ public sealed record ClaimCandidateForValidation
         CandidateOrdinal = candidateOrdinal;
         ClaimText = RequireNonEmpty(claimText, nameof(claimText));
         StructuredCandidateJson = RequireObjectJson(structuredCandidateJson, nameof(structuredCandidateJson));
+        NormalizedSourceText = normalizedSourceText?.Trim() ?? string.Empty;
     }
 
     public ClaimCandidateId CandidateId { get; }
@@ -35,6 +37,7 @@ public sealed record ClaimCandidateForValidation
     public int CandidateOrdinal { get; }
     public string ClaimText { get; }
     public string StructuredCandidateJson { get; }
+    public string NormalizedSourceText { get; }
 
     private static string RequireNonEmpty(string value, string parameterName) =>
         string.IsNullOrWhiteSpace(value)

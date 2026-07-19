@@ -24,7 +24,11 @@ public sealed class PostgresClaimExtractionPersistence(NpgsqlDataSource dataSour
             new Longevity.Domain.Workflow.WorkflowRunId(reader.GetGuid(1)),
             reader.GetString(2),
             reader.GetString(3),
-            reader.GetString(4));
+            reader.GetString(4),
+            reader.GetString(5),
+            reader.IsDBNull(6) ? null : reader.GetString(6),
+            reader.GetString(7),
+            reader.GetString(8));
 
         if (await reader.ReadAsync(cancellationToken))
         {

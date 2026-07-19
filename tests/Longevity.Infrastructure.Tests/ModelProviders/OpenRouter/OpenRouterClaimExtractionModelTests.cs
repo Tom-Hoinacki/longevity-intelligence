@@ -12,10 +12,16 @@ namespace Longevity.Infrastructure.Tests.ModelProviders.OpenRouter;
 
 public sealed class OpenRouterClaimExtractionModelTests
 {
+    private const string ValidCandidateJson = """
+        {"assetSlug":"test-compound","assetName":"Test compound","assetType":"compound","assetSummary":null,"claimType":"human_trial","targetSystem":null,"population":"adults","outcomeMeasured":"biomarker","evidenceLevel":"randomized_controlled_trial","evidenceDirection":"supports","effectSummary":"measured change","limitations":"short follow-up","supportingExcerpt":"A normalized text.","sampleSize":120,"replicationCount":1,"directness":"direct","riskOfBias":"moderate","consistency":"consistent","publicationStatus":"peer_reviewed","isRetracted":false,"hasSeriousMethodologicalLimitations":false,"conflictOfInterest":"none"}
+        """;
+
     [Fact]
     public async Task Sends_expected_request_and_maps_candidates_and_metadata()
     {
-        var handler = new RecordingHandler(Response("[{\"claimText\":\"first\",\"structuredCandidate\":{\"claim\":\"first\"}},{\"claimText\":\"second\",\"structuredCandidate\":{\"claim\":\"second\"}}]", 12, 7, 0.0123m));
+        var structured = JsonDocument.Parse(ValidCandidateJson).RootElement;
+        var candidates = JsonSerializer.Serialize(new[] { new { claimText = "first", structuredCandidate = structured }, new { claimText = "second", structuredCandidate = structured } });
+        var handler = new RecordingHandler(Response(candidates, 12, 7, 0.0123m));
         var model = Create(handler, out var source);
         var result = await model.ExtractAsync(source, CancellationToken.None);
 
@@ -27,12 +33,17 @@ public sealed class OpenRouterClaimExtractionModelTests
         Assert.Equal("test-model", JsonDocument.Parse(handler.Body!).RootElement.GetProperty("model").GetString());
         var body = JsonDocument.Parse(handler.Body!).RootElement;
         Assert.Equal("json_schema", body.GetProperty("response_format").GetProperty("type").GetString());
+        var candidateSchema = body.GetProperty("response_format").GetProperty("json_schema").GetProperty("schema").GetProperty("properties").GetProperty("candidates").GetProperty("items").GetProperty("properties").GetProperty("structuredCandidate").GetProperty("properties");
+        Assert.True(candidateSchema.TryGetProperty("sampleSize", out _));
+        Assert.True(candidateSchema.TryGetProperty("supportingExcerpt", out _));
+        Assert.False(candidateSchema.TryGetProperty("evidenceScore", out _));
+        Assert.False(candidateSchema.TryGetProperty("hypeScore", out _));
         var user = body.GetProperty("messages")[1].GetProperty("content").GetString()!;
         Assert.Equal(source.Title, JsonDocument.Parse(user).RootElement.GetProperty("title").GetString());
         Assert.Equal(source.SourceIdentityKey, JsonDocument.Parse(user).RootElement.GetProperty("sourceIdentityKey").GetString());
         Assert.Equal(source.NormalizedText, JsonDocument.Parse(user).RootElement.GetProperty("text").GetString());
         Assert.Equal(new[] { "first", "second" }, result.Candidates.Select(x => x.ClaimText));
-        Assert.Equal("{\"claim\":\"first\"}", result.Candidates[0].StructuredCandidateJson);
+        Assert.Equal("test-compound", JsonDocument.Parse(result.Candidates[0].StructuredCandidateJson).RootElement.GetProperty("assetSlug").GetString());
         Assert.Equal(12, result.Metadata.InputTokenCount);
         Assert.Equal(7, result.Metadata.OutputTokenCount);
         Assert.Equal(0.0123m, result.Metadata.EstimatedCost);
@@ -82,6 +93,18 @@ public sealed class OpenRouterClaimExtractionModelTests
         var cancellation = new CancellationTokenSource(); cancellation.Cancel();
         var model = Create(new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK), cancellation: true), out var source);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => model.ExtractAsync(source, cancellation.Token));
+    }
+
+    [Fact]
+    public async Task Http_timeout_propagates_without_exposing_source_or_key()
+    {
+        var options = Options.Create(new OpenRouterClaimExtractionOptions { ApiKey = "timeout-key", Model = "test-model" });
+        using var client = new HttpClient(new DelayedHandler()) { BaseAddress = new Uri("https://openrouter.test/api/v1/"), Timeout = TimeSpan.FromMilliseconds(10) };
+        var source = new NormalizedScientificSource(new(Guid.NewGuid()), new(Guid.NewGuid()), "doi:10.1000/test", "Title", "private normalized source");
+        var model = new OpenRouterClaimExtractionModel(client, options);
+        var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => model.ExtractAsync(source, default));
+        Assert.DoesNotContain("timeout-key", error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(source.NormalizedText, error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -145,6 +168,15 @@ public sealed class OpenRouterClaimExtractionModelTests
             Request = request; Body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
             if (cancellation) throw new OperationCanceledException(cancellationToken);
             return response;
+        }
+    }
+
+    private sealed class DelayedHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK);
         }
     }
 }

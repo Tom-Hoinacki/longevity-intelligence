@@ -23,7 +23,8 @@ public sealed class PostgresClaimCandidateValidationPersistence(NpgsqlDataSource
                 reader.GetInt32(3),
                 reader.GetInt32(4),
                 reader.GetString(5),
-                reader.GetString(6)));
+                reader.GetString(6),
+                reader.GetString(7)));
         }
 
         return candidates;
