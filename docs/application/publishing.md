@@ -4,7 +4,7 @@ The publishing phase is the provider-independent boundary between an approved wo
 
 ## Application boundary
 
-`IEvidencePublicationPersistence` has two operations: load the approved batch for a claimed workflow run and publish one complete `AtomicPublicationCommand`. A future adapter must write the source, claims, and evidence links in one database transaction. Application contracts contain no SQL or provider-specific types.
+`IEvidencePublicationPersistence` has two operations: load the approved batch for a claimed workflow run and publish one complete `AtomicPublicationCommand`. The Postgres adapter writes the idempotency record, source, assets, claims, and evidence links in one short database transaction. Application contracts contain no SQL or provider-specific types. The contract is backed by `20260712210000_workflow_publication_idempotency.sql`.
 
 `PublishingWorkflowRunPhaseHandler` validates workflow identity and version, publishing state, approval identity and time, reviewer identity, claim identities and contiguous ordinals, validation and approval flags, object-root structured JSON, and source evidence links. Invalid batches fail with sanitized invariant messages. Successful new publication and an identical prior publication both advance to `published`; persistence conflicts and failures propagate.
 
@@ -16,6 +16,6 @@ Commands snapshot collections, sort claims by ordinal, and sort evidence links d
 
 ## Evidence-graph mapping and safety
 
-The eventual adapter should map `PublicationSource` to the public source record, `PublicationClaim` to claim records, and `PublicationEvidenceLink` to source-to-claim provenance edges. Sponsorship must remain separate from evidence scoring. The boundary does not provide medical advice and must not receive or publish personal health data.
+The adapter maps `PublicationSource` to the public source record, structured candidate fields to assets/claims/evidence, and `PublicationEvidenceLink` to source-to-claim provenance edges. Sponsorship remains separate from evidence scoring. The boundary does not provide medical advice and must not receive or publish personal health data.
 
-Postgres persistence and dependency-injection registration are deliberately deferred until a concrete adapter is implemented and validated through a migration-backed change.
+Repeated publication with the same run/version and fingerprint is a no-op; reuse with a different fingerprint is a conflict. Model/network work is completed before the transaction begins.

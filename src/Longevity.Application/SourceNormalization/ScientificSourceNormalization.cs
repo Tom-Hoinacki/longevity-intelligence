@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Longevity.Application.Contracts;
 
 namespace Longevity.Application.SourceNormalization;
 
@@ -17,7 +18,7 @@ public sealed record ScientificSourceNormalizationRequest(string SourceType, str
 public sealed record ScientificSourceNormalizationResult(string SourceType, string Title, string NormalizedText, string SourceIdentityKey, string? CanonicalUrl, string ContentHash, string NormalizationVersion);
 public interface IScientificSourceNormalizer { ScientificSourceNormalizationResult Normalize(ScientificSourceNormalizationRequest request); }
 
-public sealed class ScientificSourceNormalizer : IScientificSourceNormalizer
+public sealed class ScientificSourceNormalizer : IScientificSourceNormalizer, ISourceNormalizer
 {
     public const string Version = "scientific-source-v1";
     public ScientificSourceNormalizationResult Normalize(ScientificSourceNormalizationRequest request)
@@ -37,7 +38,7 @@ public sealed class ScientificSourceNormalizer : IScientificSourceNormalizer
     {
         var doi = Doi(ids.Doi); if (doi is not null) return $"doi:{doi}";
         var pmid = Pmid(ids.Pmid); if (pmid is not null) return $"pmid:{pmid}";
-        var nct = Nct(ids.ClinicalTrialsGovIdentifier); if (nct is not null) return $"clinicaltrials:{nct}";
+        var nct = Nct(ids.ClinicalTrialsGovIdentifier); if (nct is not null) return $"clinicaltrials:{nct.ToLowerInvariant()}";
         return $"url:{Url(ids.CanonicalUrl, true)}";
     }
     private static string? Doi(string? value)
@@ -58,6 +59,17 @@ public sealed class ScientificSourceNormalizer : IScientificSourceNormalizer
     {
         if (string.IsNullOrWhiteSpace(value)) return null; var v = value.Trim().ToUpperInvariant();
         if (v.Length != 11 || !v.StartsWith("NCT", StringComparison.Ordinal) || v[3..].Any(c => c is < '0' or > '9')) throw new ArgumentException("The ClinicalTrials.gov identifier must be NCT followed by eight digits.", "ClinicalTrialsGovIdentifier"); return v;
+    }
+
+    public Task<ScientificSourceNormalizationResult> NormalizeAsync(SubmittedAuthoritativeSource source, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Normalize(new ScientificSourceNormalizationRequest(
+            source.SourceType,
+            source.Title,
+            source.RawContent,
+            new AuthoritativeSourceIdentifiers(source.Doi, source.Pmid, source.ClinicalTrialsGovIdentifier, source.CanonicalUrl))));
     }
     private static string? Url(string? value, bool required)
     {

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Npgsql;
 using Longevity.Application.Contracts;
 using Longevity.Application.HumanReview;
+using Longevity.Application.Publishing;
 
 namespace Longevity.Infrastructure.Persistence;
 
@@ -45,6 +46,8 @@ public static class PostgresServiceCollectionExtensions
             services.AddSingleton<IClaimExtractionPersistence, PostgresClaimExtractionPersistence>();
             services.AddSingleton<IClaimCandidateValidationPersistence, PostgresClaimCandidateValidationPersistence>();
             services.AddSingleton<IHumanReviewPersistence, PostgresHumanReviewPersistence>();
+            services.AddSingleton<IWorkflowIntakePersistence, PostgresWorkflowIntakePersistence>();
+            services.AddSingleton<IEvidencePublicationPersistence, PostgresEvidencePublicationPersistence>();
         }
 
         return services;

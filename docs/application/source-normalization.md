@@ -6,4 +6,4 @@ Version `scientific-source-v1` applies Unicode NFC, line-ending and BOM normaliz
 
 Identity priority is DOI, PMID, ClinicalTrials.gov identifier, then canonical HTTP(S) URL. Identities are prefixed with `doi:`, `pmid:`, `clinicaltrials:`, or `url:`. URLs lose fragments and default ports but retain meaningful paths and queries.
 
-The lowercase SHA-256 hash is computed over UTF-8 fields containing the version, normalized source type, title, identity, canonical URL, and normalized text, separated by LF characters. This result can later be composed with `NormalizedScientificSource` when persistence supplies workflow and database identifiers.
+The lowercase SHA-256 hash is computed over UTF-8 fields containing the version, normalized source type, title, identity, canonical URL, and normalized text, separated by LF characters. `ISourceNormalizer` adapts this deterministic result to workflow intake; Postgres then composes it with workflow and source-record identifiers. ClinicalTrials.gov identities are stored as `clinicaltrials:nct########` so they satisfy the migration identity constraint.

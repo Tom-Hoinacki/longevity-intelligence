@@ -3,7 +3,8 @@ namespace Longevity.Infrastructure.Persistence;
 public static class ClaimExtractionPersistencePolicy
 {
     public const string LoadNormalizedSourceSql = """
-        SELECT id, workflow_run_id, source_identity_key, title, normalized_text
+        SELECT id, workflow_run_id, source_identity_key, title, normalized_text,
+               source_type, canonical_url, content_hash, normalization_version
         FROM workflow.source_records
         WHERE workflow_run_id = $1;
         """;

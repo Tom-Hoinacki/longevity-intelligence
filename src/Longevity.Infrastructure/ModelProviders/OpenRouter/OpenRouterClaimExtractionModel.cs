@@ -26,8 +26,8 @@ public sealed class OpenRouterClaimExtractionModel(HttpClient httpClient, IOptio
         {
             model = settings.Model,
             temperature = 0,
-            messages = new[] { new { role = "system", content = "Extract concise evidence claims. Return only the requested JSON object." }, new { role = "user", content = userPayload } },
-            response_format = new { type = "json_schema", json_schema = new { name = "claim_extraction", strict = true, schema = new { type = "object", properties = new { candidates = new { type = "array", items = new { type = "object", properties = new { claimText = new { type = "string" }, structuredCandidate = new { type = "object" } }, required = new[] { "claimText", "structuredCandidate" }, additionalProperties = false } } }, required = new[] { "candidates" }, additionalProperties = false } } }
+            messages = new[] { new { role = "system", content = "Extract source-grounded evidence claims only. Do not give medical advice. Preserve uncertainty and limitations. Return only the requested JSON object." }, new { role = "user", content = userPayload } },
+            response_format = new { type = "json_schema", json_schema = new { name = "claim_extraction", strict = true, schema = new { type = "object", properties = new { candidates = new { type = "array", items = new { type = "object", properties = new { claimText = new { type = "string" }, structuredCandidate = StructuredCandidateSchema() }, required = new[] { "claimText", "structuredCandidate" }, additionalProperties = false } } }, required = new[] { "candidates" }, additionalProperties = false } } }
         });
         using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         var requestId = response.Headers.TryGetValues("x-request-id", out var ids) ? ids.FirstOrDefault() : null;
@@ -64,4 +64,31 @@ public sealed class OpenRouterClaimExtractionModel(HttpClient httpClient, IOptio
     private static int? UsageInt(JsonElement usage, string name) => usage.ValueKind == JsonValueKind.Object && usage.TryGetProperty(name, out var value) && value.TryGetInt32(out var result) && result >= 0 ? result : null;
     private static OpenRouterClaimExtractionException Invalid(string message) => new(message);
     private static StringContent JsonContent(object value) => new(JsonSerializer.Serialize(value, JsonOptions), Encoding.UTF8, "application/json");
+
+    private static object StructuredCandidateSchema() => new
+    {
+        type = "object",
+        properties = new Dictionary<string, object>
+        {
+            ["assetSlug"] = new { type = "string" },
+            ["assetName"] = new { type = "string" },
+            ["assetType"] = new { type = "string" },
+            ["assetSummary"] = new { type = new[] { "string", "null" } },
+            ["claimType"] = new { type = new[] { "string", "null" } },
+            ["targetSystem"] = new { type = new[] { "string", "null" } },
+            ["population"] = new { type = new[] { "string", "null" } },
+            ["outcomeMeasured"] = new { type = new[] { "string", "null" } },
+            ["evidenceLevel"] = new { type = "string" },
+            ["evidenceDirection"] = new { type = "string", @enum = new[] { "supports", "contradicts", "neutral" } },
+            ["effectSummary"] = new { type = new[] { "string", "null" } },
+            ["limitations"] = new { type = "string" },
+            ["relevanceScore"] = new { type = new[] { "number", "null" } },
+            ["evidenceScore"] = new { type = new[] { "number", "null" } },
+            ["hypeScore"] = new { type = new[] { "number", "null" } },
+            ["riskScore"] = new { type = new[] { "number", "null" } },
+            ["plainEnglishVerdict"] = new { type = new[] { "string", "null" } }
+        },
+        required = new[] { "assetSlug", "assetName", "assetType", "assetSummary", "claimType", "targetSystem", "population", "outcomeMeasured", "evidenceLevel", "evidenceDirection", "effectSummary", "limitations", "relevanceScore", "evidenceScore", "hypeScore", "riskScore", "plainEnglishVerdict" },
+        additionalProperties = false
+    };
 }
